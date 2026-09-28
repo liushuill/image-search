@@ -1,0 +1,25 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "image-search"
+version = "0.2.0"
+description = "二次元图片溯源工具 — 以图搜图查找图片来源（Pixiv / Danbooru 等）"
+readme = "README.md"
+requires-python = ">=3.10"
+
+# ⚠️ 依赖的单一来源是 requirements.txt。
+#    这里刻意不重复声明，避免「同一事实写在多处、改一处漏一处」。
+dependencies = []
+
+[project.scripts]
+imgsearch = "imgsearch.cli:main"
+
+[tool.setuptools.packages.find]
+# 自动发现所有子包，新增 engine/子模块时无需回来改这张表
+include = ["imgsearch*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

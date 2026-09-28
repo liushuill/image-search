@@ -1,0 +1,16 @@
+# ─────────────────────────────────────────────────────────────
+# GUI 依赖（PySide6 / Qt6）
+#
+#   .venv/bin/pip install -r requirements-gui.txt
+#   ./run-gui.sh
+#
+# 说明：
+#   - PySide6 走 pip 装在 venv 里，不需要 sudo / 不需要 apt 包
+#   - 已实测 6.11.2 在 KDE Wayland 下使用原生 wayland 平台插件
+#     （不走 XWayland），拖拽与 HiDPI 均为原生行为
+#   - 纯 CLI 使用无需安装本文件
+# ─────────────────────────────────────────────────────────────
+
+-r requirements.txt
+
+PySide6>=6.6.0

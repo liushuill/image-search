@@ -1,0 +1,120 @@
+"""
+网络请求工具模块
+"""
+
+import time
+from typing import Optional
+
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+def create_session(
+    proxies: dict = None,
+    timeout: int = 30,
+    max_retries: int = 3,
+    user_agent: Optional[str] = None,
+    use_cloudscraper: bool = False,
+) -> requests.Session:
+    """
+    创建配置好的 requests Session
+
+    Args:
+        proxies: 代理配置
+        timeout: 超时时间(秒)
+        max_retries: 最大重试次数
+        user_agent: 自定义 User-Agent
+        use_cloudscraper: 是否使用 cloudscraper 绕过 Cloudflare 反爬
+
+    Returns:
+        配置好的 Session
+    """
+    if use_cloudscraper:
+        try:
+            import cloudscraper
+            session = cloudscraper.create_scraper()
+        except ImportError:
+            print("  ⚠️ cloudscraper 未安装，降级为普通 requests.Session")
+            session = requests.Session()
+    else:
+        session = requests.Session()
+
+    if not use_cloudscraper:
+        # 普通 Session：挂载重试适配器 + 设置默认 UA
+        retry_strategy = Retry(
+            total=max_retries,
+            backoff_factor=1,
+            status_forcelist=[429, 500, 502, 503, 504],
+            allowed_methods=["GET", "POST"],
+        )
+        adapter = HTTPAdapter(max_retries=retry_strategy)
+        session.mount("http://", adapter)
+        session.mount("https://", adapter)
+
+        # User-Agent
+        if user_agent:
+            session.headers.update({"User-Agent": user_agent})
+        else:
+            session.headers.update({
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            })
+
+    # 代理（仅非 cloudscraper 时设置，或 cloudscraper 有代理需要时）
+    if proxies:
+        session.proxies.update(proxies)
+
+    return session
+
+
+def download_file(
+    url: str,
+    save_path: str,
+    proxies: dict = None,
+    timeout: int = 60,
+    max_retries: int = 3,
+    headers: dict = None,
+) -> bool:
+    """
+    下载文件
+
+    Args:
+        url: 文件 URL
+        save_path: 保存路径
+        proxies: 代理配置
+        timeout: 超时时间(秒)
+        max_retries: 最大重试次数
+        headers: 自定义请求头
+
+    Returns:
+        是否下载成功
+    """
+    session = create_session(proxies=proxies, timeout=timeout, max_retries=max_retries)
+    if headers:
+        session.headers.update(headers)
+
+    for attempt in range(max_retries):
+        try:
+            resp = session.get(url, stream=True, timeout=timeout)
+            resp.raise_for_status()
+
+            with open(save_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=8192):
+                    if chunk:
+                        f.write(chunk)
+            return True
+
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                wait = 2 ** attempt
+                time.sleep(wait)
+                continue
+            raise
+        finally:
+            session.close()
+
+    return False

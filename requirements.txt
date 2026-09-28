@@ -1,0 +1,26 @@
+# ─────────────────────────────────────────────────────────────
+# 核心运行依赖（CLI + 引擎层 + 导出）
+#
+# 安装：
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r requirements-dev.txt     # 含测试依赖
+#   # 或仅运行时：
+#   .venv/bin/pip install -r requirements.txt
+#
+# ⚠️ Debian/Ubuntu 的系统 Python 有 PEP 668 保护（EXTERNALLY-MANAGED），
+#    直接用 pip 装到系统环境会被拒绝 —— 必须用 venv。见 run.sh。
+# ─────────────────────────────────────────────────────────────
+
+# HTTP 请求
+requests>=2.28.0
+requests-toolbelt>=1.0.0
+
+# 图片处理（尺寸/格式识别、dHash 感知哈希）
+Pillow>=9.0.0
+
+# HTML 搜索引擎解析（Ascii2D / IQDB）
+beautifulsoup4>=4.11.0
+lxml>=4.9.0
+
+# Cloudflare 反爬绕过（Ascii2D 可选，缺失时自动降级为普通请求）
+cloudscraper>=1.2.71
