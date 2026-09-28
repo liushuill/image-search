@@ -3,7 +3,7 @@
 """
 
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 from PIL import Image, UnidentifiedImageError
 

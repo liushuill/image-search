@@ -72,22 +72,52 @@ SAUCENAO_KEY=xxx ./run.sh search 图片.jpg
 ## 搜索引擎
 
 ```bash
-./run.sh engines list                  # 查看引擎与权重（权重小的先用）
-./run.sh engines toggle ascii2d        # 启用/禁用
-./run.sh engines move sauceNAO --up    # 调整顺序
-./run.sh engines config sauceNAO       # 查看某引擎的详细配置
-./run.sh engines reset                 # 恢复默认列表
+./run.sh engines list                    # 查看引擎、权重与「为什么不能用」的备注
+./run.sh engines show sauceNAO           # 查看某引擎的全部配置字段与说明
+./run.sh engines config sauceNAO --set api_url=https://...   # 改任意字段（--set 可重复）
+./run.sh engines toggle ascii2d          # 启用 / 禁用
+./run.sh engines move sauceNAO --up      # 调整搜索顺序
+./run.sh engines rename my_engine newname  # 改名（顺序与模块绑定都会保留）
+./run.sh engines new my_engine           # 生成自定义引擎模板到 my_engines/
+./run.sh engines reset                   # 恢复默认列表
 ```
 
-内置引擎：
+内置引擎（权重小的先用）：
 
-| 引擎 | 类型 | 说明 |
-|---|---|---|
-| `sauceNAO` | 官方 API | Pixiv 覆盖最好，需要 API Key；有速率限制（4 次 / 30 秒）|
-| `ascii2d` | HTML 解析 | 无需 Key；可选 Cloudflare 绕过 |
-| `danbooru` | 官方 API | 可用于补标签信息 |
+| 引擎 | 类型 | 默认 | 说明 |
+|---|---|---|---|
+| `sauceNAO` | 官方 API | ✅ 启用 | Pixiv 覆盖最好，需要 API Key |
+| `iqdb` | HTML 解析 | ✅ 启用 | IQDB 聚合：Danbooru / Konachan / yande.re / Gelbooru / Sankaku / e-shuushuu / Zerochan / Anime-Pictures。无需凭据 |
+| `ascii2d` | HTML 解析 | ⏸ 禁用 | 站点已对上传端点返回 403，备用图床也被阻断，暂不可用 |
+| `traceMoe` | 官方 API | ⏸ 禁用 | 动画截图溯源（回答"第几集第几秒"）。**对插画会高分误报**，需要时用 `-e traceMoe` |
+| `danbooru` | 官方 API | ⏸ 禁用 | 需要账号（用户名 + API Key）|
 
-搜索时会按权重顺序依次尝试，第一个有结果的引擎即返回。
+### auto 模式：按权重降级 + 阈值判定
+
+`search` 不带 `-e` 时按权重顺序依次尝试已启用的引擎：
+
+1. 某引擎的最高相似度 **≥ 它自己的阈值** → 立即采用
+2. 未达阈值 → 记为候选，继续试下一个引擎
+3. 全部试完仍无一达标 → 返回置信度相对最高的一组，并**明确标注低置信度**
+4. 引擎报错（网络/配置/限额）→ 打印原因并跳过，不中断整轮
+
+⚠️ **阈值按引擎校准，不是统一数字**。各引擎的相似度量纲不同——同一张图
+IQDB 报 53%、SauceNAO 报 95%——用一刀切的阈值会把 IQDB 这类刻度偏保守的引擎永久误杀。
+各引擎默认值见 `engines show <名称>`，可用 `--min-similarity` 临时覆盖（`0` = 不设阈值）。
+
+### 网络与代理
+
+代理**不是常开**，程序会自动处理：
+
+- 全局 `proxy` 配置存在但探测不通 → **自动降级为直连**（只影响本次运行，不改配置）
+- 每个引擎可单独设 `proxy_mode`：
+  - `auto`（默认）跟随全局设置
+  - `on` 强制走代理 —— 适合 Pixiv / catbox 这类境内不可达的服务
+  - `off` 强制直连 —— 适合 saucenao / iqdb 这类直连即可的
+  ```bash
+  ./run.sh engines config iqdb --set proxy_mode=on
+  ```
+- 连接失败的引擎**不会**白等 `request_delay`（没发出去的请求不消耗配额）
 
 ---
 
@@ -99,17 +129,35 @@ image-search/
 │   ├── config.py              ← 非敏感配置（config.json）+ 敏感键转发
 │   ├── secrets.py             ← 凭据读写（.env / 环境变量，原子写 + 0600）
 │   ├── cli.py                 ← 命令行入口
-│   ├── engines/               ← 搜索引擎（base / registry / 各引擎实现）
+│   ├── engines/               ← 搜索引擎
+│   │   ├── schema.py          ←   CONFIG_SCHEMA 协议（字段声明/类型/校验）
+│   │   ├── base.py            ←   SearchEngine / SearchResult
+│   │   ├── registry.py        ←   引擎类注册与解析（自动发现内置引擎）
+│   │   ├── store.py           ←   EngineStore：配置的唯一数据源
+│   │   ├── quota.py           ←   滑动窗口限流（跨进程有效）
+│   │   └── saucenao / iqdb / ascii2d / tracemoe / danbooru
 │   ├── links/pixiv.py         ← Pixiv 图片直链模板管理
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
-├── tests/                     ← pytest
+├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
+├── tests/                     ← pytest（193 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── run.sh / run.bat           ← 启动器（自动建 venv）
 ├── run_cli.py                 ← 单文件入口（供打包用）
 ├── gui.py                     ← 旧 tkinter GUI（待迁移到 PySide6）
 └── requirements*.txt          ← 依赖（唯一的依赖声明来源）
 ```
+
+### 加一个搜索引擎
+
+架构目标是**只写一个文件**：
+
+1. `./run.sh engines new mysite` → 生成 `my_engines/mysite.py` 模板
+2. 在模板里声明 `CONFIG_SCHEMA`（要暴露哪些配置）并实现 `search()`
+3. `./run.sh engines add mysite --module my_engines.mysite --class Mysite`
+
+配置表单、类型转换、校验、`.env` 回退、限流、CLI 的 `show`/`--set`
+全部由 schema 自动派生，**不需要改动任何界面或 CLI 代码**。
 
 ---
 
@@ -135,15 +183,36 @@ image-search/
 
 已完成：
 
+**P1 — Linux 适配与拆仓**
+
 - ✅ 适配 Linux：venv 启动脚本、PEP 668 兼容、路径全部 `pathlib`
 - ✅ 项目拆为独立 git 仓库，工作区父仓不再跟踪本目录
 - ✅ 凭据迁移到 `.env`，`config.json` 不再含任何密钥
 - ✅ 重构为 `imgsearch/` 核心包（核心层与 UI 解耦）
 - ✅ 修复 `PROJECT_DIR` 路径错位、`config.json` 非原子写等缺陷
 
+**P2 — 引擎层重写**
+
+- ✅ `EngineStore` 单一数据源（旧版多实例互相覆盖 → lost update）
+- ✅ Schema 驱动配置：字段/类型/校验/`.env` 回退集中一处
+- ✅ 修复 9 项引擎配置缺陷（改名丢模块绑定、缓存键错误、`0` 被当空值、
+  大小写口径不一致、`load()` 短路漏补默认值、陈旧字段误伤校验 等），均有回归测试
+- ✅ 新增 IQDB、TraceMoe 引擎；内置引擎自动发现
+- ✅ `engines new` 自定义引擎脚手架（加引擎 = 写一个文件）
+- ✅ auto 模式按权重降级 + **按引擎校准**的相似度阈值
+- ✅ 按引擎的代理路由 `proxy_mode`；连接失败不再白等间隔
+- ✅ 测试从 94 项扩到 **193 项**，且全部隔离到临时目录（不再碰真实配置）
+
 待办：
 
-- ⏳ 引擎层重写：单一数据源、Schema 驱动配置、新增 TraceMoe / IQDB 等
 - ⏳ SQLite 本地图库（去重 + 缓存命中）
 - ⏳ 多格式导出（urls.txt / CSV / JSON / HTML 缩略图墙 / 剪贴板）
 - ⏳ GUI 迁移到 PySide6（Qt6）：原生拖拽、Schema 配置表单
+
+### 待验证（需开代理后复测）
+
+- 🔎 **Ascii2D 是否真的不可用**：实测 `/search/color/` 返回 403、
+  备用图床 catbox.moe TLS 握手失败。但当时是外网/移动网络环境，
+  **403 可能与出口 IP 有关**，需在 Clash 代理下复测再定论
+- 🔎 各引擎的 `min_similarity` 默认值是按少量样本校准的，
+  建议用 `wating_for_search/` 批量实测后再微调

@@ -108,7 +108,7 @@ def download_file(
                         f.write(chunk)
             return True
 
-        except requests.RequestException as e:
+        except requests.RequestException:
             if attempt < max_retries - 1:
                 wait = 2 ** attempt
                 time.sleep(wait)

@@ -4,60 +4,106 @@
   "search_engines": [
     {
       "name": "ascii2d",
-      "enabled": true,
+      "enabled": false,
       "priority": 1,
-      "api_url": "https://ascii2d.net",
-      "api_key": "",
-      "headers": {},
-      "params": {},
-      "request_delay": 3.0,
-      "timeout": 30,
-      "long_limit": 100,
-      "short_limit": 4,
-      "long_window": 0,
-      "short_window": 0,
-      "bypass_cfw": true,
       "module_path": "",
-      "class_name": ""
+      "class_name": "",
+      "settings": {
+        "api_url": "https://ascii2d.net",
+        "api_key": "",
+        "headers": {},
+        "params": {},
+        "request_delay": 3.0,
+        "timeout": 30,
+        "bypass_cfw": true,
+        "min_similarity": 60,
+        "proxy_mode": "auto"
+      }
     },
     {
       "name": "sauceNAO",
       "enabled": true,
       "priority": 2,
-      "api_url": "https://saucenao.com/search.php",
-      "api_key": "",
-      "headers": {},
-      "params": {
-        "db": 999,
-        "output_type": 2
-      },
-      "request_delay": 8.0,
-      "timeout": 30,
-      "long_limit": 100,
-      "short_limit": 4,
-      "long_window": 86400,
-      "short_window": 30,
-      "bypass_cfw": false,
       "module_path": "",
-      "class_name": ""
+      "class_name": "",
+      "settings": {
+        "api_url": "https://saucenao.com/search.php",
+        "api_key": "",
+        "headers": {},
+        "params": {
+          "db": 999,
+          "output_type": 2
+        },
+        "request_delay": 8.0,
+        "timeout": 30,
+        "long_limit": 100,
+        "short_limit": 4,
+        "long_window": 86400,
+        "short_window": 30,
+        "db": 999,
+        "numres": 5,
+        "min_similarity": 60,
+        "proxy_mode": "auto"
+      }
     },
     {
-      "name": "Danbooru",
+      "name": "danbooru",
       "enabled": true,
       "priority": 3,
-      "api_url": "",
-      "api_key": "",
-      "headers": {},
-      "params": {},
-      "request_delay": 8.0,
-      "timeout": 30,
-      "long_limit": 100,
-      "short_limit": 4,
-      "long_window": 86400,
-      "short_window": 30,
-      "bypass_cfw": false,
       "module_path": "",
-      "class_name": ""
+      "class_name": "",
+      "settings": {
+        "api_url": "",
+        "api_key": "",
+        "headers": {},
+        "params": {},
+        "request_delay": 8.0,
+        "timeout": 30,
+        "login": "",
+        "min_similarity": 60,
+        "proxy_mode": "auto"
+      }
+    },
+    {
+      "name": "iqdb",
+      "enabled": true,
+      "priority": 4,
+      "module_path": "",
+      "class_name": "",
+      "settings": {
+        "api_url": "",
+        "api_key": "",
+        "request_delay": 8.0,
+        "timeout": 30,
+        "headers": {},
+        "params": {},
+        "services": "1,2,3,4,5,6,11,13",
+        "min_similarity": 0,
+        "proxy_mode": "auto"
+      }
+    },
+    {
+      "name": "traceMoe",
+      "enabled": false,
+      "priority": 5,
+      "module_path": "",
+      "class_name": "",
+      "settings": {
+        "api_url": "",
+        "api_key": "",
+        "request_delay": 8.0,
+        "timeout": 30,
+        "headers": {},
+        "params": {},
+        "long_limit": 100,
+        "long_window": 60,
+        "short_limit": 0,
+        "short_window": 0,
+        "cut_borders": true,
+        "anilist_info": true,
+        "min_similarity": 0,
+        "proxy_mode": "auto"
+      }
     }
   ],
   "pixiv_sources": [

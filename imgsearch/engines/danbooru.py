@@ -14,13 +14,15 @@ API 文档：https://danbooru.donmai.us/wiki_pages/help:api
 
 import io
 from pathlib import Path
-from typing import List, Optional
+from typing import List
 
 import requests
 from requests.auth import HTTPBasicAuth
 from PIL import Image
 
+from imgsearch import secrets
 from imgsearch.engines.base import SearchEngine, SearchResult
+from imgsearch.engines.schema import COMMON_SCHEMA, Field, Schema
 from imgsearch.config import get_proxies
 from imgsearch.utils.network import create_session
 
@@ -28,28 +30,48 @@ from imgsearch.utils.network import create_session
 class Danbooru(SearchEngine):
     """Danbooru 搜索引擎"""
 
-    API_URL = "https://danbooru.donmai.us"
+    NAME = "danbooru"
+    DISPLAY_NAME = "Danbooru"
+    DEFAULT_API_URL = "https://danbooru.donmai.us"
+    DEFAULT_ORDER = 50
+    # 需要账号才能用，默认不启用，避免开箱即报错
+    ENABLED_BY_DEFAULT = False
 
-    def __init__(self, api_key: str = None, timeout: int = 30, proxies: dict = None,
-                 api_url: str = "", headers: dict = None, params: dict = None,
-                 bypass_cfw: bool = False):
-        super().__init__(timeout=timeout, proxies=proxies,
-                         api_url=api_url, headers=headers, params=params,
-                         api_key=api_key, bypass_cfw=bypass_cfw)
+    CONFIG_SCHEMA = COMMON_SCHEMA.extend(
+        Schema(
+            # 原本要求用户去「自定义查询参数」里手填 login，隐蔽且易错。
+            # 现在是独立字段，且有 .env 回退。
+            Field("login", "用户名", "str", "",
+                  help="Danbooru 账号名；留空回退到 .env 的 DANBOORU_LOGIN",
+                  env_var="DANBOORU_LOGIN", required=True,
+                  placeholder="your_username"),
+        ),
+    )
 
-        # 登录名从 params 中的 login 字段获取
-        self.login = (self.params or {}).get("login", "").strip()
+    def __init__(self, **options):
+        super().__init__(**options)
+
+        # 用户名：配置优先，其次 .env
+        self.login = (
+            str(self.opt("login", "") or "").strip()
+            or (secrets.get("DANBOORU_LOGIN", "") or "")
+        )
+        # API Key：配置优先，其次 .env
+        self.api_key = (
+            self.api_key or secrets.get("DANBOORU_API_KEY", "") or ""
+        )
+
         if not self.login:
             raise ValueError(
                 "Danbooru 用户名未配置！\n"
-                "请在引擎配置的「自定义查询参数」中添加:\n"
-                "  Key: login, Value: 您的 Danbooru 用户名\n"
-                "并在「API Key」字段填写您的 API Key"
+                "  1. 在引擎配置的「用户名」字段填入 Danbooru 账号\n"
+                "  2. 或写入 .env：DANBOORU_LOGIN=你的用户名"
             )
         if not self.api_key:
             raise ValueError(
                 "Danbooru API Key 未配置！\n"
-                "请在引擎配置的「API Key」字段填写您的 API Key"
+                "  1. https://danbooru.donmai.us/profile → API Key\n"
+                "  2. 写入 .env：DANBOORU_API_KEY=你的KEY"
             )
 
     def search(self, image_path: str) -> List[SearchResult]:
@@ -104,7 +126,7 @@ class Danbooru(SearchEngine):
         # HTTP Basic Auth (login:api_key)
         session.auth = HTTPBasicAuth(self.login, self.api_key)
 
-        api_url = (self.api_url or self.API_URL).rstrip("/")
+        api_url = (self.api_url or self.DEFAULT_API_URL).rstrip("/")
         endpoint = f"{api_url}/iqdb_queries.json"
 
         # 请求参数

@@ -15,17 +15,16 @@ Ascii2D 的搜索流程：
 
 import re
 import time
-import io
 from pathlib import Path
 from typing import List, Optional
-from urllib.parse import quote, urlparse
+from urllib.parse import quote
 
 import requests
 from bs4 import BeautifulSoup
-from PIL import Image
 
 from imgsearch.engines.base import SearchEngine, SearchResult
-from imgsearch.config import get, get_proxies
+from imgsearch.engines.schema import BOOL, COMMON_SCHEMA, Field, Schema
+from imgsearch.config import get_proxies
 from imgsearch.utils.network import create_session
 
 
@@ -37,16 +36,31 @@ CATBOX_UPLOAD_URL = "https://catbox.moe/user/api.php"
 class Ascii2D(SearchEngine):
     """Ascii2D 搜索引擎"""
 
-    SEARCH_URL = "https://ascii2d.net/search/url/"
-    COLOR_SEARCH_URL = "https://ascii2d.net/search/color/"
+    NAME = "ascii2d"
+    DISPLAY_NAME = "Ascii2D"
+    DEFAULT_API_URL = "https://ascii2d.net"
+    DEFAULT_ORDER = 30
+    # ⚠️ 默认禁用：ascii2d.net 已对 /search/color/ 返回 403，
+    # 备用图床 catbox.moe 的 TLS 握手在境内也被阻断。
+    # 保留实现以便日后站点恢复，需要时用 `-e ascii2d` 手动调用。
+    ENABLED_BY_DEFAULT = False
 
-    def __init__(self, timeout: int = 30, proxies: dict = None,
-                 api_url: str = "", headers: dict = None, params: dict = None,
-                 api_key: str = "", bypass_cfw: bool = False):
-        super().__init__(timeout=timeout, proxies=proxies,
-                         api_url=api_url, headers=headers, params=params,
-                         api_key=api_key)
-        self.bypass_cfw = bypass_cfw
+    CONFIG_SCHEMA = COMMON_SCHEMA.extend(
+        Schema(
+            Field("bypass_cfw", "Cloudflare 反爬绕过", BOOL, False,
+                  help="改用 cloudscraper 发起请求；未安装该库时自动降级为普通请求"),
+        ),
+    )
+
+    # 端点由 api_url 推导，这样「API 地址」配置项对 Ascii2D 也是有效的
+    # （旧实现把站点写死在常量里，配置项形同虚设）
+    @property
+    def SEARCH_URL(self) -> str:  # noqa: N802 - 保持既有引用可用
+        return f"{(self.api_url or self.DEFAULT_API_URL).rstrip('/')}/search/url/"
+
+    @property
+    def COLOR_SEARCH_URL(self) -> str:  # noqa: N802
+        return f"{(self.api_url or self.DEFAULT_API_URL).rstrip('/')}/search/color/"
 
     def search(self, image_path: str) -> List[SearchResult]:
         """

@@ -4,9 +4,6 @@ SauceNAO 模块测试
 测试搜索结果的解析逻辑，使用 mock 数据模拟 API 响应。
 """
 
-import pytest
-
-from imgsearch.engines.base import SearchResult
 from imgsearch.engines.saucenao import SauceNAO
 
 

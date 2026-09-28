@@ -4,10 +4,8 @@ Ascii2D 解析相关测试
 使用 mock HTML 验证解析逻辑，不发起真实 HTTP 请求。
 """
 
-import pytest
 from bs4 import BeautifulSoup
 
-from imgsearch.engines.base import SearchResult
 from imgsearch.engines.ascii2d import Ascii2D
 
 

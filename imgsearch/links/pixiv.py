@@ -14,11 +14,11 @@ Pixiv URL 生成器
 """
 
 import csv
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, asdict
 from pathlib import Path
 from typing import List, Optional
 
-from imgsearch.config import get, save_config, PROJECT_DIR
+from imgsearch.config import get, save_config
 
 
 # ──────────────────────────────────────────────

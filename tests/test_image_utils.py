@@ -2,8 +2,6 @@
 image_utils 模块测试
 """
 
-import os
-import tempfile
 from pathlib import Path
 
 import pytest

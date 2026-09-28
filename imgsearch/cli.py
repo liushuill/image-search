@@ -37,7 +37,6 @@
 """
 
 import io
-import os
 import sys
 
 # 强制 stdout/stderr 使用 UTF-8 编码，确保中文和特殊字符正常显示
@@ -50,20 +49,22 @@ if getattr(sys.stderr, 'encoding', '').upper() != 'UTF-8':
 import argparse
 import csv
 import json
+import re
 import time
 from pathlib import Path
 from typing import List, Optional
 
 # 项目以包的形式运行（python -m imgsearch），无需注入 sys.path
 from imgsearch import secrets
-from imgsearch.config import get, save_config, load_config, is_secret_key
-from imgsearch.engines.config import (
-    EngineConfig, EngineManager, _BUILTIN_ENGINES,
-    resolve_engine_class, register_engine_class,
+from imgsearch.config import get, save_config, load_config, is_secret_key, PROJECT_DIR
+from imgsearch.engines.registry import resolve_engine_class
+from imgsearch.engines.schema import ConfigError
+from imgsearch.engines.store import (
+    EngineConfig,
+    EngineNotFoundError,
+    EngineStore,
+    get_store,
 )
-from imgsearch.engines.saucenao import SauceNAO
-from imgsearch.engines.ascii2d import Ascii2D
-from imgsearch.engines.danbooru import Danbooru
 from imgsearch.links.pixiv import PixivUrlGenerator
 from imgsearch.processor.image_utils import (
     SUPPORTED_FORMATS,
@@ -71,7 +72,6 @@ from imgsearch.processor.image_utils import (
     get_image_info,
     get_file_hash,
 )
-from imgsearch.utils.network import download_file
 
 
 def _print_secrets():
@@ -100,19 +100,18 @@ def cmd_search(args):
         print(f"   支持的格式: {', '.join(sorted(SUPPORTED_FORMATS))}")
         sys.exit(1)
 
-    # 验证引擎名称（动态 choices：通过 resolve_engine_class 解析）
+    # 验证引擎名称
     engine = args.engine
     if engine != "auto":
-        mgr = EngineManager()
-        ec = mgr.get_by_name(engine)
+        store = get_store()
+        ec = store.get(engine)
         if ec is None:
-            # 即使不在配置中，尝试构造一个临时 EngineConfig 检查动态加载
-            ec = EngineConfig(name=engine, enabled=True, priority=0)
-        engine_cls = resolve_engine_class(ec)
-        if engine_cls is None:
-            known = [e.name for e in mgr.list_all()]
-            print(f"❌ 未知搜索引擎: {engine}")
-            print(f"   可用引擎: auto, {', '.join(sorted(set(known)))}")
+            known = store.names()
+            print(f"❌ 未配置该搜索引擎: {engine}")
+            print(f"   可用引擎: auto, {', '.join(known) if known else '(无)'}")
+            sys.exit(1)
+        if resolve_engine_class(ec) is None:
+            print(f"❌ 引擎 '{ec.name}' 的类无法解析（自定义引擎请检查 module_path / class_name）")
             sys.exit(1)
 
     # 获取图片信息
@@ -130,7 +129,25 @@ def cmd_search(args):
     print("=" * 50)
 
     # 搜索
-    results = search_image(image_path, engine=engine)
+    # 指定单个引擎时错误会向上抛（auto 模式则在内部跳过并继续），
+    # 这里统一转成可读提示，不让用户看到原始 traceback。
+    try:
+        results = search_image(image_path, engine=engine,
+                               min_similarity=args.min_similarity)
+    except EngineNotFoundError as e:
+        print(f"\n❌ {e}")
+        sys.exit(1)
+    except KeyboardInterrupt:
+        print("\n已中断")
+        sys.exit(130)
+    except Exception as e:
+        print(f"\n❌ 搜索失败（引擎 {engine}）：")
+        for line in str(e).strip().splitlines():
+            print(f"   {line}")
+        print("\n💡 排查建议：")
+        print("   · 查看该引擎配置： imgsearch engines show " + engine)
+        print("   · 网络/代理是否可用： imgsearch config show")
+        sys.exit(1)
 
     if not results:
         print("\n❌ 未找到匹配结果")
@@ -278,105 +295,178 @@ def cmd_batch(args):
         print(f"   ⚠️ 保存 CSV 日志失败: {e}")
 
 
-# 注册内置引擎到动态加载缓存
-register_engine_class("sauceNAO", SauceNAO)
-register_engine_class("ascii2d", Ascii2D)
-register_engine_class("danbooru", Danbooru)
+def _resolve_proxies() -> Optional[dict]:
+    """
+    读取代理配置。
+
+    配置了代理但探测不可用时**自动降级为直连** —— 只影响本次运行，
+    不修改配置（代理不是常开，见 HANDOVER）。
+
+    Returns:
+        requests 格式的 proxies，未配置或不可用返回 None
+    """
+    proxy_str = get("proxy", "")
+    if not proxy_str:
+        return None
+
+    proxies = {"http": proxy_str, "https": proxy_str}
+    from imgsearch.config import check_proxy
+    if not check_proxy(proxies):
+        print(f"  ⚠️ 代理 {proxy_str} 不可用，已自动降级为直连")
+        print(f"    如需更换代理: imgsearch config set proxy YOUR_PROXY")
+        return None
+    return proxies
 
 
-def search_image(
-    image_path: str,
-    engine: str = "auto",
-) -> List:
+def _needs_proxy(ec) -> Optional[bool]:
+    """
+    按引擎的 proxy_mode 决定路由。
+
+    Returns:
+        True 强制走代理 / False 强制直连 / None 跟随全局设置
+    """
+    mode = str(ec.get("proxy_mode", "auto") or "auto").strip().lower()
+    if mode == "on":
+        return True
+    if mode == "off":
+        return False
+    return None
+
+
+def _is_network_error(exc: BaseException) -> bool:
+    """
+    判断是否属于「根本没连上服务器」的失败。
+
+    这类失败不消耗对方的配额，因此没必要等 request_delay 再试下一个引擎 ——
+    否则网络不通时会变成「引擎数 × 8 秒」的干等。
+    """
+    import requests
+    return isinstance(exc, (
+        ConnectionError, TimeoutError,
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+        requests.exceptions.SSLError,
+    ))
+
+
+def search_image(image_path: str, engine: str = "auto",
+                 min_similarity: Optional[int] = None) -> List:
     """
     搜索图片来源
 
+    auto 模式的判定规则：
+      1. 按权重顺序依次尝试「已启用」的引擎
+      2. 某引擎的最高相似度 >= **该引擎自己的**阈值 → 立即采用
+      3. 未达阈值 → 记为候选，继续试下一个引擎
+      4. 全部试完仍无一达标 → 返回置信度相对最高的一组，并明确标注低置信度
+
+    ⚠️ 阈值按引擎校准，不用统一数字：各引擎的相似度量纲不同
+    （同一张图 IQDB 报 53%、SauceNAO 报 95%），一刀切会误杀刻度偏保守的引擎。
+
     Args:
         image_path: 图片路径
-        engine: 搜索引擎 (auto 表示按配置顺序依次尝试，或指定具体引擎名)
+        engine: "auto"，或具体引擎名（指定引擎时不降级、不套阈值）
+        min_similarity: 覆盖本次运行的阈值（0-100）
 
     Returns:
-        搜索结果列表（SearchResult 对象）
+        搜索结果列表（SearchResult）
+
+    Raises:
+        EngineNotFoundError: 指定的引擎不存在或没有启用任何引擎
     """
-    proxies = None
-    proxy_str = get("proxy", "")
-    if proxy_str:
-        proxies = {"http": proxy_str, "https": proxy_str}
-        # 检测代理是否可用，不可用则降级为直连（不清除配置，仅运行时降级）
-        from imgsearch.config import check_proxy
-        if not check_proxy(proxies):
-            print(f"  ⚠️ 代理 {proxy_str} 不可用，已自动降级为直连")
-            print(f"    如需更换代理，请运行: imgsearch config set proxy YOUR_PROXY")
-            proxies = None
+    store = get_store()
+    target = (engine or "auto").strip()
 
-    results = []
-    mgr = EngineManager()
-
-    if engine == "auto":
-        # 从 EngineManager 获取已启用的引擎列表（自动按 priority 排序）
-        engine_order = mgr.get_enabled()
+    if target == "auto":
+        engine_order = store.get_enabled()
+        if not engine_order:
+            raise EngineNotFoundError(
+                "没有启用任何搜索引擎。\n"
+                "  查看：imgsearch engines list\n"
+                "  启用：imgsearch engines toggle <名称>"
+            )
     else:
-        # 只尝试指定的引擎（查找 EngineConfig 以获取配置）
-        ec = mgr.get_by_name(engine)
+        ec = store.get(target)
         if ec is None:
-            # 未在配置中找到，回退到默认
-            engine_order = [EngineConfig(name=engine, enabled=True, priority=0)]
-        else:
-            engine_order = [ec]
+            raise EngineNotFoundError(f"未找到引擎：{target}")
+        engine_order = [ec]
 
-    for idx, ec in enumerate(engine_order):
-        engine_name = ec.name
-        # 先查缓存/内置映射，再尝试动态导入
-        engine_cls = resolve_engine_class(ec)
-        if engine_cls is None:
-            print(f"  ⚠️ 未知搜索引擎: {engine_name}，已跳过")
-            print(f"    如需添加自定义引擎，请配置 module_path + class_name")
+    # 全局代理只探活一次：探测本身最长 5 秒，不能每个引擎都探一遍
+    global_proxies = _resolve_proxies()
+
+    results: List = []
+    fallback = None            # (超出阈值的幅度, 结果, 引擎)
+    warned_offline = False
+    sent_to_network = False
+
+    for ec in engine_order:
+        # 只有「上一次真的把请求发到了服务器」才需要等间隔
+        if sent_to_network:
+            delay = float(ec.get("request_delay", 8.0) or 0)
+            if delay > 0:
+                print(f"  ⏳ 等待 {delay} 秒后切换到下一引擎...")
+                time.sleep(delay)
+
+        want_proxy = _needs_proxy(ec)
+        if want_proxy is False:
+            proxies = None
+        else:
+            proxies = global_proxies
+            if want_proxy is True and not proxies:
+                print(f"  ⚠️ {ec.display_name} 设为强制走代理，但代理不可用，将直连尝试")
+
+        sent_to_network = False
+        try:
+            print(f"  🌐 正在使用 {ec.display_name} 搜索...")
+            # 参数与类型由引擎的 CONFIG_SCHEMA 决定，此处不再逐字段拼装
+            eng = store.build_engine(ec, proxies=proxies)
+            results = eng.search(image_path)
+            sent_to_network = True
+        except Exception as e:
+            if target != "auto":
+                raise
+            lines = [ln for ln in str(e).strip().splitlines() if ln.strip()]
+            print(f"  ⚠️ 跳过 {ec.display_name}：{lines[0] if lines else e}")
+            for line in lines[1:]:
+                print(f"     {line}")
+            if _is_network_error(e) and not warned_offline:
+                warned_offline = True
+                print("  💡 连不上，可能是网络问题：")
+                print("       · 查看代理配置：imgsearch config show")
+                print("       · 只让该引擎走代理：")
+                print(f"         imgsearch engines config {ec.name} --set proxy_mode=on")
             continue
 
-        # 引擎间请求间隔（避免触发限流）
-        if idx > 0:
-            delay = getattr(ec, "request_delay", 8.0)
-            print(f"  ⏳ 等待 {delay} 秒后切换到下一引擎...")
-            time.sleep(delay)
+        if not results:
+            print(f"  · {ec.display_name}：无匹配")
+            continue
 
-        try:
-            print(f"  🌐 正在使用 {engine_name} 搜索...")
+        # 指定了具体引擎就不套阈值 —— 用户已明确要求用它
+        if target != "auto":
+            return results
 
-            # 解析引擎自身的 API Key，如果为空则回退到全局配置
-            api_key = ec.api_key or mgr.get_resolved_api_key(engine_name) or get("saucenao_key", "")
-            timeout = getattr(ec, "timeout", 30) or 30
+        threshold = (min_similarity if min_similarity is not None
+                     else int(ec.get("min_similarity", 60) or 0))
+        best = max(r.similarity for r in results)
 
-            # 从配置读取所有通用参数
-            api_url = getattr(ec, "api_url", "") or ""
-            headers = getattr(ec, "headers", None) or {}
-            params = getattr(ec, "params", None) or {}
+        if best >= threshold:
+            if threshold > 0:
+                print(f"  ✓ {ec.display_name}：最高 {best:.1f}%（阈值 {threshold}%），采用")
+            return results
 
-            # 统一构造引擎实例（各引擎 __init__ 通过 **kwargs 吸收自身需要的参数）
-            kwargs = dict(
-                api_key=api_key, timeout=timeout, proxies=proxies,
-                api_url=api_url, headers=headers, params=params,
-                bypass_cfw=getattr(ec, "bypass_cfw", False),
-            )
+        print(f"  · {ec.display_name}：最高 {best:.1f}% 低于阈值 {threshold}%，继续尝试下一个")
+        margin = best - threshold
+        if fallback is None or margin > fallback[0]:
+            fallback = (margin, results, ec)
 
-            if engine_name == "sauceNAO":
-                long_limit = getattr(ec, "long_limit", 100) or 100
-                short_limit = getattr(ec, "short_limit", 4) or 4
-                long_window = getattr(ec, "long_window", 86400)
-                short_window = getattr(ec, "short_window", 30)
-                kwargs.update(
-                    long_limit=long_limit, short_limit=short_limit,
-                    long_window=long_window, short_window=short_window,
-                )
-
-            eng = engine_cls(**kwargs)
-
-            results = eng.search(image_path)
-            if results:
-                return results
-        except Exception as e:
-            print(f"  ⚠️ {engine_name} 搜索失败: {e}")
-            if engine != "auto":
-                raise
+    if fallback is not None:
+        _, results, ec = fallback
+        print()
+        print("  ⚠️ 没有任何引擎达到各自的相似度阈值。")
+        print(f"     以下为置信度相对最高的一组（来自 {ec.display_name}），请自行核对。")
+        print("     若确认可用，可调低该引擎阈值：")
+        print(f"       imgsearch engines config {ec.name} --set min_similarity=40")
+        return results
 
     return results
 
@@ -385,21 +475,29 @@ def print_results(results: List):
     """打印搜索结果"""
     print()
     for i, r in enumerate(results, 1):
-        print(f"  [{i}] {r.source}")
-        if r.similarity > 0:
-            print(f"      相似度: {r.similarity:.1f}%")
+        print(f"  [{i}] {r.source}   相似度 {r.similarity:.1f}%")
         if r.pixiv_id:
-            pixiv_img = r.pixiv_image_id()
-            print(f"      📌 Pixiv: {pixiv_img}")
+            print(f"      📌 Pixiv: {r.pixiv_image_id()}")
             print(f"      🔗 https://www.pixiv.net/artworks/{r.pixiv_id}")
         if r.artist:
             print(f"      🎨 画师: {r.artist}")
-        if r.title:
-            print(f"      📄 标题: {r.title}")
-        if r.ext_urls:
-            print(f"      🔗 来源: {r.ext_urls[0]}")
         if r.material:
             print(f"      📺 作品: {r.material}")
+        if r.title:
+            print(f"      📄 标题: {r.title}")
+        if r.detail:
+            print(f"      📝 {r.detail}")
+        site_ids = []
+        for label, value in (("Danbooru", r.danbooru_id), ("Gelbooru", r.gelbooru_id),
+                             ("Twitter", r.twitter_id)):
+            if value:
+                site_ids.append(f"{label}={value}")
+        site_ids.extend(f"{k}={v}" for k, v in r.extra_ids.items())
+        if site_ids:
+            print(f"      🆔 {', '.join(site_ids)}")
+        # 全部来源链接（旧实现只打印第一条，其余静默丢弃）
+        for url in r.ext_urls:
+            print(f"      🔗 {url}")
         print()
 
 
@@ -455,6 +553,11 @@ def main():
         action="store_true",
         help="搜索后生成 Pixiv 图片 URL",
     )
+    search_parser.add_argument(
+        "--min-similarity", type=int, default=None, metavar="0-100",
+        help="覆盖相似度阈值：低于此值的结果视为不可信，继续尝试下一个引擎。"
+             "0 = 不设阈值（第一个有结果的引擎即采用）",
+    )
 
     # batch 子命令
     batch_parser = subparsers.add_parser("batch", help="批量搜索目录中的图片")
@@ -497,11 +600,26 @@ def main():
 
     # engines 子命令：管理搜索引擎列表及顺序
     engines_parser = subparsers.add_parser("engines", help="管理搜索引擎列表及顺序")
-    engines_parser.add_argument("action", choices=["list", "add", "remove", "toggle", "reset", "move", "config"], help="操作")
+    engines_parser.add_argument(
+        "action",
+        choices=["list", "show", "add", "remove", "rename", "toggle",
+                 "reset", "move", "config", "new"],
+        help="list 列表 | show 查看配置 | new 生成自定义引擎模板 | "
+             "add/remove/rename/toggle/move/reset/config 管理",
+    )
     engines_parser.add_argument("name", nargs="?", help="引擎名称")
+    engines_parser.add_argument("new_name", nargs="?", help="新名称（rename 时使用）")
     engines_parser.add_argument("--up", action="store_true", help="向上移动（move 时使用）")
     engines_parser.add_argument("--down", action="store_true", help="向下移动（move 时使用）")
-    # engines config 子选项
+    # 通用配置路径：--set key=value（可重复），对任何 schema 字段都有效
+    engines_parser.add_argument("--set", action="append", default=None, metavar="KEY=VALUE",
+                                help="设置任意配置字段，格式 key=value（可重复使用）")
+    # 自定义引擎的模块绑定
+    engines_parser.add_argument("--module", type=str, default=None,
+                                help="自定义引擎的模块路径，如 my_engines.my_engine")
+    engines_parser.add_argument("--class-name", type=str, default=None,
+                                help="自定义引擎的类名，如 MyEngine")
+    # 以下专用 flag 保留以兼容旧用法
     engines_parser.add_argument("--api-url", type=str, default=None, help="API 地址（config 时使用）")
     engines_parser.add_argument("--api-key", type=str, default=None, help="API 密钥（config 时使用）")
     engines_parser.add_argument("--request-delay", type=float, default=None, help="请求间隔秒数（config 时使用）")
@@ -673,212 +791,381 @@ def cmd_source(args):
 
 def cmd_engines(args):
     """处理 engines 子命令：管理搜索引擎列表及顺序"""
-    mgr = EngineManager()
+    store = get_store()
+    action = args.action
 
-    if args.action == "list":
-        engines = mgr.list_all()
-        if not engines:
-            print("📭 暂无搜索引擎配置")
-            return
+    # ── 不需要引擎名的动作 ──
+    if action == "list":
+        _print_engine_list(store)
+        return
 
-        enabled = [e for e in engines if e.enabled]
-        disabled = [e for e in engines if not e.enabled]
-
-        print(f"\n🔍 搜索引擎列表 ({len(engines)} 个):")
-        print("=" * 60)
-        print(f"  {'权重':<6} {'名称':<16} {'状态':<8} {'类型':<10}")
-        print("-" * 60)
-        for e in engines:
-            status = "✅ 启用" if e.enabled else "❌ 禁用"
-            etype = "📦 内置" if mgr.is_builtin(e.name) else "🔧 自定义"
-            print(f"  {e.priority:<6} {e.name:<16} {status:<8} {etype:<10}")
-        print()
-        print(f"  ✅ 启用: {len(enabled)} 个 | ❌ 禁用: {len(disabled)} 个")
-        print()
-        print("💡 操作示例:")
-        print("   imgsearch engines add my_engine        # 添加自定义引擎")
-        print("   imgsearch engines remove my_engine     # 删除自定义引擎")
-        print("   imgsearch engines toggle sauceNAO      # 启用/禁用引擎")
-        print("   imgsearch engines move ascii2d --up    # 向上移动")
-        print("   imgsearch engines move sauceNAO --down # 向下移动")
-        print("   imgsearch engines reset                # 恢复默认")
-
-    elif args.action == "add":
-        name = args.name
-        if not name:
-            print("❌ 请指定引擎名称")
-            print("   示例: imgsearch engines add my_engine")
-            sys.exit(1)
-
-        ok = mgr.add(name)
-        if ok:
-            print(f"✅ 已添加自定义引擎: {name}")
-            _print_engine_list(mgr)
-        else:
-            print(f"❌ 添加失败，引擎名称已存在: {name}")
-            sys.exit(1)
-
-    elif args.action == "remove":
-        name = args.name
-        if not name:
-            print("❌ 请指定要删除的引擎名称")
-            print("   示例: imgsearch engines remove my_engine")
-            sys.exit(1)
-
-        if mgr.is_builtin(name):
-            print(f"❌ 内置引擎不可删除: {name}")
-            print("   你可以使用 `toggle` 来禁用它")
-            sys.exit(1)
-
-        ok = mgr.remove(name)
-        if ok:
-            print(f"✅ 已删除引擎: {name}")
-            _print_engine_list(mgr)
-        else:
-            print(f"❌ 未找到引擎: {name}")
-            sys.exit(1)
-
-    elif args.action == "toggle":
-        name = args.name
-        if not name:
-            print("❌ 请指定引擎名称")
-            print("   示例: imgsearch engines toggle sauceNAO")
-            sys.exit(1)
-
-        new_state = mgr.toggle(name)
-        if new_state is None:
-            print(f"❌ 未找到引擎: {name}")
-            sys.exit(1)
-        status = "启用" if new_state else "禁用"
-        print(f"✅ 已{status}引擎: {name}")
-        print(f"   权重: {mgr.get_by_name(name).priority}")
-
-    elif args.action == "reset":
-        mgr.reset()
+    if action == "reset":
+        store.reset()
         print("✅ 已恢复默认搜索引擎列表")
-        _print_engine_list(mgr)
+        _print_engine_list(store)
+        return
 
-    elif args.action == "move":
-        name = args.name
-        if not name:
-            print("❌ 请指定引擎名称")
-            print("   示例: imgsearch engines move sauceNAO --down")
-            sys.exit(1)
+    if action == "new":
+        _scaffold_custom_engine(args.name)
+        return
 
-        if args.up and args.down:
-            print("❌ 不能同时指定 --up 和 --down")
-            sys.exit(1)
+    # ── 以下动作都需要引擎名 ──
+    name = args.name
+    if not name:
+        print(f"❌ 请指定引擎名称：imgsearch engines {action} <名称>")
+        sys.exit(1)
 
-        direction = None
-        if args.up:
-            direction = -1
-        elif args.down:
-            direction = 1
-        else:
-            print("❌ 请指定移动方向: --up 或 --down")
-            print("   示例: imgsearch engines move sauceNAO --down")
-            sys.exit(1)
+    try:
+        if action == "show":
+            _show_engine_config(store, name)
 
-        ok = mgr.move(name, direction)
-        if not ok:
-            print(f"❌ 无法移动引擎: {name}（已在边界或未找到）")
-            sys.exit(1)
+        elif action == "add":
+            ec = store.add(name,
+                           module_path=args.module or "",
+                           class_name=args.class_name or "")
+            print(f"✅ 已添加引擎: {ec.name}（权重 #{ec.priority}）")
+            if not store.is_builtin(ec.name) and not (ec.module_path and ec.class_name):
+                print("   ⚠️ 自定义引擎需要模块绑定，否则无法解析。补上：")
+                print(f"      imgsearch engines config {ec.name} "
+                      f"--module my_engines.{ec.name} --class MyEngine")
+                print(f"      或用 `imgsearch engines new {ec.name}` 生成模板")
+            _print_engine_list(store)
 
-        dir_text = "上" if direction == -1 else "下"
-        print(f"✅ 已向{dir_text}移动引擎: {name}")
-        _print_engine_list(mgr)
+        elif action == "remove":
+            store.remove(name)
+            print(f"✅ 已删除引擎: {name}")
+            _print_engine_list(store)
 
-    elif args.action == "config":
-        name = args.name
-        if not name:
-            print("❌ 请指定引擎名称")
-            print("   示例: imgsearch engines config sauceNAO --api-key YOUR_KEY")
-            sys.exit(1)
+        elif action == "rename":
+            new_name = args.new_name
+            if not new_name:
+                print("❌ 请指定新名称：imgsearch engines rename <旧名> <新名>")
+                sys.exit(1)
+            if store.get(name) is None:
+                print(f"❌ 未找到引擎: {name}")
+                sys.exit(1)
+            store.rename(name, new_name)
+            print(f"✅ 已改名: {name} → {new_name}")
+            print("   （顺序、模块绑定与全部配置均原样保留）")
 
-        engine = mgr.get_by_name(name)
-        if engine is None:
-            print(f"❌ 未找到引擎: {name}")
-            sys.exit(1)
+        elif action == "toggle":
+            new_state = store.toggle(name)
+            if new_state is None:
+                print(f"❌ 未找到引擎: {name}")
+                sys.exit(1)
+            print(f"✅ 已{'启用' if new_state else '禁用'}引擎: {name}")
 
-        # 收集要更新的字段
-        kwargs = {}
-        if args.api_url is not None:
-            kwargs["api_url"] = args.api_url
-        if args.api_key is not None:
-            kwargs["api_key"] = args.api_key
-        if args.request_delay is not None:
-            kwargs["request_delay"] = args.request_delay
-        if args.timeout is not None:
-            kwargs["timeout"] = args.timeout
-        if args.long_limit is not None:
-            kwargs["long_limit"] = args.long_limit
-        if args.short_limit is not None:
-            kwargs["short_limit"] = args.short_limit
-        if args.long_window is not None:
-            kwargs["long_window"] = args.long_window
-        if args.short_window is not None:
-            kwargs["short_window"] = args.short_window
+        elif action == "move":
+            if args.up and args.down:
+                print("❌ 不能同时指定 --up 和 --down")
+                sys.exit(1)
+            direction = -1 if args.up else (1 if args.down else None)
+            if direction is None:
+                print("❌ 请指定方向: --up 或 --down")
+                sys.exit(1)
+            if not store.move(name, direction):
+                print(f"❌ 无法移动: {name}（已在边界或未找到）")
+                sys.exit(1)
+            print(f"✅ 已向{'上' if direction == -1 else '下'}移动: {name}")
+            _print_engine_list(store)
 
-        # 处理 --header key:value（可重复）
-        if args.header:
-            headers = engine.headers.copy()
-            for h in args.header:
-                if ":" in h:
-                    k, v = h.split(":", 1)
-                    headers[k.strip()] = v.strip()
-                else:
-                    print(f"  ⚠️ 无效 header 格式（应为 key:value）: {h}")
-            kwargs["headers"] = headers
+        elif action == "config":
+            _update_engine_config(store, name, args)
 
-        # 处理 --param key:value（可重复）
-        if args.param:
-            params = engine.params.copy()
-            for p in args.param:
-                if ":" in p:
-                    k, v = p.split(":", 1)
-                    params[k.strip()] = v.strip()
-                else:
-                    print(f"  ⚠️ 无效 param 格式（应为 key:value）: {p}")
-            kwargs["params"] = params
-
-        if not kwargs:
-            # 没有要更新的字段，显示当前配置
-            print(f"\n⚙ 引擎配置: {name}")
-            print("=" * 50)
-            print(f"  API 地址:      {engine.api_url or '(未设置)'}")
-            print(f"  API Key:       {'***' if engine.api_key else '(未设置)'}")
-            print(f"  请求间隔(秒):  {engine.request_delay}")
-            print(f"  超时(秒):      {engine.timeout}")
-            long_limit = getattr(engine, "long_limit", 100) or 100
-            short_limit = getattr(engine, "short_limit", 4) or 4
-            long_window = getattr(engine, "long_window", 86400)
-            short_window = getattr(engine, "short_window", 30)
-            print(f"  长期限额(次):  {long_limit}  (0=无限制)")
-            print(f"  短期限额(次):  {short_limit}  (0=无限制)")
-            print(f"  长期窗口(秒):  {long_window}  (默认 86400 = 24h)")
-            print(f"  短期窗口(秒):  {short_window}  (默认 30 = 30s)")
-            print(f"  自定义 Headers: {json.dumps(engine.headers, ensure_ascii=False) if engine.headers else '(无)'}")
-            print(f"  自定义 Params:  {json.dumps(engine.params, ensure_ascii=False) if engine.params else '(无)'}")
-            return
-
-        ok = mgr.update_config(name, **kwargs)
-        if ok:
-            print(f"✅ 已更新引擎配置: {name}")
-            print(f"   更新的字段: {', '.join(kwargs.keys())}")
-        else:
-            print(f"❌ 更新配置失败: {name}")
-            sys.exit(1)
+    except ConfigError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
 
 
-def _print_engine_list(mgr: EngineManager):
-    """打印当前引擎列表"""
-    engines = mgr.list_all()
-    print(f"\n📋 当前引擎顺序:")
-    for e in engines:
-        status = "✅" if e.enabled else "❌"
-        etype = "📦" if mgr.is_builtin(e.name) else "🔧"
-        print(f"   {e.priority}. {etype} {status} {e.name}")
+def _fmt_field_value(f, value) -> str:
+    """把字段值格式化成可读文本（凭据脱敏）"""
+    from imgsearch.engines.schema import BOOL, KV
+
+    if f is not None and f.is_secret:
+        if not value:
+            if f.env_var and secrets.is_set(f.env_var):
+                return f"(留空 → 使用 .env 的 {f.env_var}：{secrets.masked(f.env_var)})"
+            return "(未设置)"
+        return "••••••••"
+
+    if value is None or value == "":
+        if f is not None and f.env_var and secrets.is_set(f.env_var):
+            return f"(留空 → 使用 .env 的 {f.env_var})"
+        return "(未设置)"
+
+    if f is not None and f.type == KV:
+        return json.dumps(value, ensure_ascii=False) if value else "(无)"
+    if f is not None and f.type == BOOL:
+        return "是" if value else "否"
+
+    text = str(value)
+    if f is not None and f.unit:
+        text = f"{text} {f.unit}"
+    return text
+
+
+def _show_engine_config(store: EngineStore, name: str) -> None:
+    """
+    显示某引擎的全部 schema 字段与当前值。
+
+    这就是 GUI 配置表单的 CLI 版本：字段、类型、说明、默认值
+    全部来自引擎声明的 CONFIG_SCHEMA，因此新增引擎会自动出现在这里。
+    """
+    ec = store.get(name)
+    if ec is None:
+        print(f"❌ 未找到引擎: {name}")
+        sys.exit(1)
+
+    cls = resolve_engine_class(ec)
+    schema = ec.schema()
+
+    print(f"\n⚙ {ec.display_name}（配置名：{ec.name}）")
+    print("=" * 64)
+    print(f"  类型     {'📦 内置' if ec.is_builtin else '🔧 自定义'}")
+    print(f"  权重     #{ec.priority}")
+    print(f"  状态     {'✅ 启用' if ec.enabled else '❌ 禁用'}")
+    if not ec.is_builtin:
+        print(f"  模块     {ec.module_path or '(未设置)'}")
+        print(f"  类名     {ec.class_name or '(未设置)'}")
+    if cls is None:
+        print("  ⚠️ 引擎类当前无法解析，以下为配置里已保存的值")
+    print("-" * 64)
+
+    for f in schema:
+        if f.key in ("enabled", "priority"):
+            continue
+        value = ec.get(f.key, f.default)
+        marker = "[高级] " if f.advanced else ""
+        print(f"  {f.label} ({f.key})")
+        print(f"      {marker}{_fmt_field_value(f, value)}")
+        if f.help:
+            print(f"      💡 {f.help}")
+
     print()
+    print("💡 修改：")
+    keys = [k for k in schema.keys() if k not in ("enabled", "priority")]
+    example = next((k for k in keys if k != "api_url"), keys[0] if keys else "api_url")
+    print(f"   imgsearch engines config {ec.name} --set {example}=值")
+    print("   （--set 可重复；字段名见上方括号内）")
+
+
+def _update_engine_config(store: EngineStore, name: str, args) -> None:
+    """
+    更新引擎配置。
+
+    主路径是通用的 ``--set key=value``（可重复），对**任何** schema 字段都有效 ——
+    这样新增引擎不需要回来给 CLI 加 flag。
+    原有的专用 flag（--api-key / --timeout …）保留以兼容旧用法。
+    """
+    ec = store.get(name)
+    if ec is None:
+        print(f"❌ 未找到引擎: {name}")
+        sys.exit(1)
+
+    updates = {}
+
+    for item in (args.set or []):
+        if "=" not in item:
+            print(f"  ⚠️ --set 需要 key=value 格式，已跳过: {item}")
+            continue
+        k, v = item.split("=", 1)
+        updates[k.strip()] = v.strip()
+
+    for flag in ("api_url", "api_key", "request_delay", "timeout",
+                 "long_limit", "short_limit", "long_window", "short_window"):
+        v = getattr(args, flag, None)
+        if v is not None:
+            updates[flag] = v
+
+    if args.header:
+        headers = dict(ec.get("headers", {}) or {})
+        for h in args.header:
+            if ":" in h:
+                k, v = h.split(":", 1)
+                headers[k.strip()] = v.strip()
+            else:
+                print(f"  ⚠️ 无效 header（应为 key:value）: {h}")
+        updates["headers"] = headers
+
+    if args.param:
+        params = dict(ec.get("params", {}) or {})
+        for p in args.param:
+            if ":" in p:
+                k, v = p.split(":", 1)
+                params[k.strip()] = v.strip()
+            else:
+                print(f"  ⚠️ 无效 param（应为 key:value）: {p}")
+        updates["params"] = params
+
+    if args.module is not None or args.class_name is not None:
+        store.set_module(
+            name,
+            args.module if args.module is not None else ec.module_path,
+            args.class_name if args.class_name is not None else ec.class_name,
+        )
+        print(f"✅ 已更新模块绑定 → {ec.module_path}::{ec.class_name}")
+
+    if not updates:
+        _show_engine_config(store, name)
+        return
+
+    # store.update 会按 schema 做类型转换与校验；非法值在这里就报错，
+    # 不会留下写了一半的配置
+    store.update(name, **updates)
+
+    print(f"✅ 已更新 {ec.display_name}:")
+    schema = ec.schema()
+    for key in updates:
+        f = schema.get(key)
+        label = f.label if f else key
+        print(f"   {label} = {_fmt_field_value(f, ec.get(key))}")
+
+
+# 自定义引擎模板：复制即可用，"加一个引擎"不再需要研究内部结构
+_CUSTOM_ENGINE_TEMPLATE = '''\
+"""
+自定义搜索引擎：{name}
+
+由 `imgsearch engines new {name}` 生成。按需修改三处：
+  1. CONFIG_SCHEMA   —— 声明要暴露到界面上的配置字段
+  2. DEFAULT_API_URL —— 站点地址
+  3. search()        —— 实际的请求与解析
+"""
+
+from typing import List
+
+from imgsearch.engines.base import SearchEngine, SearchResult
+from imgsearch.engines.schema import COMMON_SCHEMA, INT, Field, Schema
+
+
+class {cls}(SearchEngine):
+    """{name} 搜索引擎"""
+
+    # 配置里使用的稳定标识（改名会影响已有配置，请谨慎）
+    NAME = "{name}"
+    DISPLAY_NAME = "{name}"
+
+    # 站点地址；用户可在「API 地址」里覆盖
+    DEFAULT_API_URL = "https://example.com/search"
+
+    # 需要账号才能用的话改成 False
+    ENABLED_BY_DEFAULT = True
+
+    # 配置字段：界面与 CLI 都按这张表自动生成
+    CONFIG_SCHEMA = COMMON_SCHEMA.extend(
+        Schema(
+            Field("some_option", "示例选项", INT, 10,
+                  help="这里写给人看的说明", minimum=0),
+        ),
+    )
+
+    def search(self, image_path: str) -> List[SearchResult]:
+        """上传图片文件搜索"""
+        self.opt_int("some_option", 10)   # 读配置：0 是合法值，不会被默认值覆盖
+        raise NotImplementedError("请实现 search()")
+
+    def search_by_url(self, image_url: str) -> List[SearchResult]:
+        """通过图片 URL 搜索（可选）"""
+        raise NotImplementedError("请实现 search_by_url()")
+
+    # 可用属性：
+    #   self.timeout / self.api_url / self.proxies / self.headers / self.params
+    # 限流（"N 次 / M 秒" 滑动窗口，跨进程有效）：
+    #   from imgsearch.engines.quota import SlidingWindowQuota
+    #   self._quota = SlidingWindowQuota("myengine", limit=60, window=60)
+    #   self._quota.check(); ...; self._quota.record()
+'''
+
+
+def _scaffold_custom_engine(name: str) -> None:
+    """生成一个自定义引擎模板到 my_engines/ 下"""
+    if not name:
+        print("❌ 用法：imgsearch engines new <名称>")
+        sys.exit(1)
+
+    safe = re.sub(r"[^0-9a-zA-Z_]", "_", name)
+    if not safe or safe[0].isdigit():
+        print(f"❌ 名称需为合法的 Python 标识符（字母/数字/下划线），当前: {name}")
+        sys.exit(1)
+
+    cls_name = "".join(part.capitalize() for part in safe.split("_")) or "MyEngine"
+    pkg_dir = PROJECT_DIR / "my_engines"
+    pkg_dir.mkdir(parents=True, exist_ok=True)
+
+    init_file = pkg_dir / "__init__.py"
+    if not init_file.exists():
+        init_file.write_text(
+            '"""自定义搜索引擎目录（本目录下的模块可被动态加载）"""\n',
+            encoding="utf-8",
+        )
+
+    target = pkg_dir / f"{safe}.py"
+    if target.exists():
+        print(f"❌ 文件已存在，未覆盖: {target}")
+        sys.exit(1)
+
+    target.write_text(
+        _CUSTOM_ENGINE_TEMPLATE.format(name=safe, cls=cls_name),
+        encoding="utf-8",
+    )
+
+    print(f"✅ 已生成模板: {target}")
+    print()
+    print("接下来：")
+    print("  1. 编辑该文件，实现 search()")
+    print("  2. 注册到引擎列表：")
+    print(f"     imgsearch engines add {safe} "
+          f"--module my_engines.{safe} --class {cls_name}")
+    print("  3. 查看 / 调整配置：")
+    print(f"     imgsearch engines show {safe}")
+
+
+def _print_engine_list(store: EngineStore) -> None:
+    """打印当前引擎列表及顺序"""
+    engines = store.list_all()
+    if not engines:
+        print("📭 暂无搜索引擎配置（imgsearch engines reset 可恢复默认）")
+        return
+
+    enabled = sum(1 for e in engines if e.enabled)
+    print(f"\n🔍 搜索引擎（共 {len(engines)} 个，启用 {enabled} 个）")
+    print("=" * 74)
+    print(f"  {'权重':<6}{'引擎':<26}{'状态':<6}{'类型':<8}备注")
+    print("-" * 74)
+    for e in engines:
+        status = "✅ 启用" if e.enabled else "❌ 禁用"
+        etype = "内置" if e.is_builtin else "自定义"
+        print(f"  #{e.priority:<5}{e.display_name:<26}{status:<6}{etype:<8}{_engine_note(e)}")
+    print()
+    print("💡 imgsearch engines show <名称>                     查看某引擎全部配置")
+    print("   imgsearch engines config <名称> --set key=value   修改配置")
+    print("   imgsearch engines toggle|move|rename|remove|add <名称>")
+    print("   imgsearch engines new <名称>                       生成自定义引擎模板")
+
+
+def _engine_note(e: EngineConfig) -> str:
+    """一行备注：把「为什么不能用」直接摆出来，而不是等搜索时才报错"""
+    if resolve_engine_class(e) is None:
+        if not e.is_builtin and not (e.module_path and e.class_name):
+            return "⚠️ 未绑定模块（--module/--class）"
+        return "⚠️ 引擎类无法解析"
+    if not e.enabled:
+        return ""
+
+    missing = []
+    for f in e.schema():
+        if f.key in ("enabled", "priority"):
+            continue
+        value = e.get(f.key, f.default)
+        if isinstance(value, str):
+            value = value.strip()
+        if value:
+            continue
+        if f.env_var and secrets.is_set(f.env_var):
+            continue
+        if f.required or f.env_var:
+            missing.append(f.label)
+    return f"⚠️ 缺少 {', '.join(missing)}" if missing else ""
 
 
 if __name__ == "__main__":
