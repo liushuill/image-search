@@ -262,7 +262,7 @@ def cmd_batch(args):
 
     # 打印统计
     print("\n" + "=" * 50)
-    print(f"📊 批量搜索完成:")
+    print("📊 批量搜索完成:")
     print(f"   ✅ 成功: {success_count}")
     print(f"   ❌ 失败: {fail_count}")
     print(f"   📁 总计: {len(image_files)}")
@@ -313,7 +313,7 @@ def _resolve_proxies() -> Optional[dict]:
     from imgsearch.config import check_proxy
     if not check_proxy(proxies):
         print(f"  ⚠️ 代理 {proxy_str} 不可用，已自动降级为直连")
-        print(f"    如需更换代理: imgsearch config set proxy YOUR_PROXY")
+        print("    如需更换代理: imgsearch config set proxy YOUR_PROXY")
         return None
     return proxies
 
@@ -710,7 +710,7 @@ def cmd_export_urls(args):
 
         if args.output:
             print(f"✅ 已保存到: {args.output}")
-        print(f"💡 可将这些 URL 粘贴到下载工具中批量下载")
+        print("💡 可将这些 URL 粘贴到下载工具中批量下载")
 
     except Exception as e:
         print(f"❌ 生成失败: {e}")
@@ -756,7 +756,7 @@ def cmd_source(args):
     elif args.action == "remove":
         if not args.name:
             print("❌ 请指定要删除的源名称")
-            print(f"   示例: imgsearch source remove pixiv.cat")
+            print("   示例: imgsearch source remove pixiv.cat")
             sys.exit(1)
         ok = downloader.remove_source(args.name)
         if ok:
@@ -768,7 +768,7 @@ def cmd_source(args):
     elif args.action == "toggle":
         if not args.name:
             print("❌ 请指定要切换的源名称")
-            print(f"   示例: imgsearch source toggle pixiv.cat")
+            print("   示例: imgsearch source toggle pixiv.cat")
             sys.exit(1)
         new_state = downloader.toggle_source(args.name)
         if new_state is None:

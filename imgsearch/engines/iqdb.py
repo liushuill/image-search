@@ -56,6 +56,19 @@ _ID_PATTERNS = (
 # 用**主机名**判定归属，而不是用页面上显示的服务名 ——
 # IQDB 有时把 Danbooru 与 Gelbooru 放在同一格里，
 # 显示文本会连成 "DanbooruGelbooru"，据此生成的键不可靠。
+# 主机 → 展示用名称（服务名的可靠来源是链接主机，不是页面上的单元格文本 ——
+# IQDB 会把 Danbooru 与 Gelbooru 放进同一格，文本会连成 "DanbooruGelbooru"）
+_SERVICE_LABELS = {
+    "danbooru": "Danbooru",
+    "gelbooru": "Gelbooru",
+    "yande_re": "yande.re",
+    "konachan": "Konachan",
+    "sankaku": "Sankaku Channel",
+    "e_shuushuu": "e-shuushuu",
+    "zerochan": "Zerochan",
+    "anime_pictures": "Anime-Pictures",
+}
+
 _SERVICE_HOSTS = {
     "danbooru.donmai.us": "danbooru",
     "gelbooru.com": "gelbooru",
@@ -87,11 +100,14 @@ class Iqdb(SearchEngine):
                        "1=Danbooru 2=Konachan 3=yande.re 4=Gelbooru "
                        "5=Sankaku 6=e-shuushuu 11=Zerochan 13=Anime-Pictures",
                   placeholder=DEFAULT_SERVICES),
-            # IQDB 报的是它自己的「相似度」刻度，同一张图通常只有 50–70%，
-            # 拿 SauceNAO 的 60% 去卡会把真实命中全部误杀，所以这里单独校准。
-            Field("min_similarity", "最低相似度", "int", 45,
-                  help="IQDB 的相似度刻度偏保守（同一张图常为 50–70%），"
-                       "默认 45% 即视为可信；低于此值会自动搜索下一个引擎",
+            # 实测校准（10 张真实待查图）：IQDB 的相似度呈双峰 ——
+            # 真实命中集中在 87–97%，噪声在 34–44%，50–86% 完全空白。
+            # 因此阈值取 65%：落在空白带内，既能收下全部真实命中，
+            # 又不会把 44% 的噪声当成答案（那种弱候选仍会以
+            # 「低置信度」形式在最终兜底时呈现，不会丢信息）。
+            Field("min_similarity", "最低相似度", "int", 65,
+                  help="IQDB 的相似度呈双峰：真实命中多在 87–97%，噪声在 45% 以下。"
+                       "默认 65% 落在两者的空白带内；低于此值会自动搜索下一个引擎",
                   minimum=0, maximum=100, unit="%"),
         ),
     )
@@ -213,7 +229,9 @@ class Iqdb(SearchEngine):
         danbooru_id = extra_ids.pop("danbooru", None)
         gelbooru_id = extra_ids.pop("gelbooru", None)
 
-        detail_bits = [b for b in (service, dimensions) if b]
+        # 用主机推导的名称替代单元格文本，避免 "DanbooruGelbooru" 这类拼接名
+        label = _SERVICE_LABELS.get(_service_from_url(source_url)) or service
+        detail_bits = [b for b in (label, dimensions) if b]
 
         return SearchResult(
             source="IQDB",

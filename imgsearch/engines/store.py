@@ -32,7 +32,7 @@ from imgsearch.engines.schema import ConfigError, Schema, check_cross_fields
 _CONFIG_KEY = "search_engines"
 # 引擎配置的结构版本，用于「字段默认值变更后需要重刷」这类迁移
 _VERSION_KEY = "search_engines_version"
-_SCHEMA_VERSION = 2
+_SCHEMA_VERSION = 3
 
 # 结构性字段：不进 settings
 _STRUCTURAL_KEYS = ("name", "enabled", "priority", "module_path", "class_name", "settings")
@@ -250,18 +250,21 @@ class EngineStore:
         只处理内置引擎：自定义引擎的字段可能是它自己的扩展，不能乱动。
 
         v0 → v2：首次引入 min_similarity 与 proxy_mode。
+        v2 → v3：用真实图库实测重新校准了 min_similarity（iqdb 45 → 65）。
         """
         if stored_version >= _SCHEMA_VERSION:
             return False
 
-        if stored_version < 2:
-            for e in self._engines:
-                if not e.is_builtin:
-                    continue
-                # 这两个字段是本版新增的，任何已存在的值都只是中间态默认值，
-                # 删掉即可让 schema 里校准过的默认值生效
+        for e in self._engines:
+            if not e.is_builtin:
+                continue
+            if stored_version < 2:
+                # 这两个字段是 v2 新增的，任何已存在的值都只是中间态默认值
                 for key in ("min_similarity", "proxy_mode"):
                     e.settings.pop(key, None)
+            elif stored_version < 3:
+                # 阈值被重新校准过，让 schema 里的新默认值生效
+                e.settings.pop("min_similarity", None)
 
         return True
 

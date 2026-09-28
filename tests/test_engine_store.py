@@ -422,18 +422,18 @@ class TestSchemaVersionMigration:
     def test_stale_defaults_are_refreshed(self, write_config):
         self._legacy(write_config)
         s = EngineStore()
-        # 各引擎校准过的默认值应生效
-        assert s.get("iqdb").get("min_similarity") == 45
+        # 各引擎实测校准过的默认值应生效
+        assert s.get("iqdb").get("min_similarity") == 65
         assert s.get("traceMoe").get("min_similarity") == 85
         assert s.get("sauceNAO").get("min_similarity") == 60
         assert s.get("iqdb").get("proxy_mode") == "auto"
 
     def test_version_is_stamped(self, write_config):
-        from imgsearch.engines.store import _VERSION_KEY
+        from imgsearch.engines.store import _SCHEMA_VERSION, _VERSION_KEY
         import imgsearch.config as cfg
         self._legacy(write_config)
         EngineStore()
-        assert cfg.load_config().get(_VERSION_KEY) == 2
+        assert cfg.load_config().get(_VERSION_KEY) == _SCHEMA_VERSION
 
     def test_migration_runs_only_once(self, write_config):
         """迁移后用户自己设的值不能被下一次加载重置"""
@@ -457,6 +457,7 @@ class TestSchemaVersionMigration:
         assert s.get("mine").get("min_similarity") == 7
 
     def test_fresh_install_gets_calibrated_defaults(self, store):
-        assert store.get("iqdb").get("min_similarity") == 45
+        # 阈值按真实图库实测校准：真实命中在 87–97%，噪声在 45% 以下
+        assert store.get("iqdb").get("min_similarity") == 65
         assert store.get("traceMoe").get("min_similarity") == 85
         assert store.get("sauceNAO").get("min_similarity") == 60

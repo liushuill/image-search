@@ -262,7 +262,7 @@ class PixivUrlGenerator:
                     pages.append(0)
 
         if not pixiv_ids:
-            raise ValueError(f"CSV 文件中没有有效的 Pixiv ID")
+            raise ValueError("CSV 文件中没有有效的 Pixiv ID")
 
         # 生成 URL
         urls = self.generate_urls(pixiv_ids, pages, source_name)
