@@ -3,11 +3,20 @@
 """
 
 import time
-from typing import Optional
+from typing import Optional, Set
 
 import requests
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+
+# 已提示过的降级原因（避免每条请求都刷屏）
+_warned: Set[str] = set()
+
+
+def _warn_once(key: str, message: str) -> None:
+    if key not in _warned:
+        _warned.add(key)
+        print(f"  ⚠️ {message}")
 
 
 def create_session(
@@ -20,6 +29,15 @@ def create_session(
     """
     创建配置好的 requests Session
 
+    ⚠️ **cloudscraper 与代理不兼容**：它自带一套自定义 SSL 上下文以模仿浏览器
+    指纹，经代理隧道时会直接在 TLS 握手阶段失败
+    （实测 `SSLV3_ALERT_HANDSHAKE_FAILURE`，且无论用 session.proxies
+    还是每次请求显式传 proxies= 都一样）。
+
+    因此当同时需要「代理」和「CF 绕过」时，**优先保代理** ——
+    能连上比绕过重要；何况 cloudscraper 也打不过现代 Cloudflare WAF
+    （实测对 ascii2d 的上传端点无论直连/代理/换请求头，一律 403）。
+
     Args:
         proxies: 代理配置
         timeout: 超时时间(秒)
@@ -30,12 +48,20 @@ def create_session(
     Returns:
         配置好的 Session
     """
+    if use_cloudscraper and proxies:
+        _warn_once(
+            "cloudscraper+proxy",
+            "cloudscraper 与代理不兼容（TLS 握手会失败），本次改用普通请求",
+        )
+        use_cloudscraper = False
+
     if use_cloudscraper:
         try:
             import cloudscraper
             session = cloudscraper.create_scraper()
         except ImportError:
-            print("  ⚠️ cloudscraper 未安装，降级为普通 requests.Session")
+            _warn_once("no-cloudscraper", "cloudscraper 未安装，降级为普通 requests.Session")
+            use_cloudscraper = False
             session = requests.Session()
     else:
         session = requests.Session()

@@ -57,6 +57,48 @@ class TestCreateSession:
             session.close()
 
 
+class TestCloudscraperProxyIncompatibility:
+    """
+    回归：cloudscraper 的自定义 SSL 上下文与代理隧道不兼容。
+
+    实测（Clash 7897）：一旦经代理，无论用 session.proxies 还是每次请求
+    显式传 proxies=，都会在 TLS 握手阶段抛 SSLV3_ALERT_HANDSHAKE_FAILURE。
+    因此同时需要「代理 + CF 绕过」时必须优先保代理，改用普通请求。
+    """
+
+    PROXY = {"http": "http://127.0.0.1:7897", "https": "http://127.0.0.1:7897"}
+
+    def test_proxy_forces_plain_session(self):
+        pytest.importorskip("cloudscraper")
+        session = create_session(proxies=self.PROXY, use_cloudscraper=True)
+        assert type(session).__name__ == "Session", \
+            "有代理时不该用 cloudscraper（会握手失败）"
+        assert session.proxies.get("https") == self.PROXY["https"]
+        session.close()
+
+    def test_without_proxy_still_uses_cloudscraper(self):
+        pytest.importorskip("cloudscraper")
+        session = create_session(use_cloudscraper=True)
+        assert type(session).__name__ == "CloudScraper"
+        session.close()
+
+    def test_proxy_applied_to_plain_session(self):
+        session = create_session(proxies=self.PROXY)
+        assert session.proxies.get("http") == self.PROXY["http"]
+        assert session.proxies.get("https") == self.PROXY["https"]
+        session.close()
+
+    def test_warning_is_emitted_only_once(self, capsys):
+        """降级提示不该每条请求都刷屏"""
+        import imgsearch.utils.network as net
+        net._warned.clear()
+        for _ in range(3):
+            create_session(proxies=self.PROXY, use_cloudscraper=True).close()
+        captured = capsys.readouterr().out
+        assert captured.count("cloudscraper 与代理不兼容") == 1
+        net._warned.clear()
+
+
 class TestDownloadFile:
     """download_file 测试"""
 

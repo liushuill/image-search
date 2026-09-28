@@ -1,5 +1,5 @@
 {
-  "proxy": "",
+  "proxy": "http://127.0.0.1:7897",
   "proxy_check_url": "https://www.google.com/generate_204",
   "search_engines": [
     {
@@ -15,9 +15,9 @@
         "params": {},
         "request_delay": 3.0,
         "timeout": 30,
-        "bypass_cfw": true,
+        "bypass_cfw": false,
         "min_similarity": 60,
-        "proxy_mode": "auto"
+        "proxy_mode": "off"
       }
     },
     {
@@ -61,7 +61,7 @@
         "timeout": 30,
         "login": "",
         "min_similarity": 60,
-        "proxy_mode": "auto"
+        "proxy_mode": "on"
       }
     },
     {
@@ -78,7 +78,7 @@
         "headers": {},
         "params": {},
         "services": "1,2,3,4,5,6,11,13",
-        "min_similarity": 0,
+        "min_similarity": 45,
         "proxy_mode": "auto"
       }
     },
@@ -101,7 +101,7 @@
         "short_window": 0,
         "cut_borders": true,
         "anilist_info": true,
-        "min_similarity": 0,
+        "min_similarity": 85,
         "proxy_mode": "auto"
       }
     }
@@ -125,5 +125,6 @@
       "enabled": true,
       "priority": 3
     }
-  ]
+  ],
+  "search_engines_version": 2
 }

@@ -399,3 +399,64 @@ class TestEngineConfigCompat:
     def test_display_name_uses_class(self):
         assert EngineConfig(name="sauceNAO").display_name.startswith("SauceNAO")
         assert EngineConfig(name="mine").display_name == "mine"
+
+
+class TestSchemaVersionMigration:
+    """
+    回归：改字段默认值对「已落盘的配置」无效。
+
+    `_apply_schema_defaults` 只在键不存在时补默认值（否则会把用户故意设的
+    0/False 顶掉），代价是先落盘的旧默认值永远留着。所以默认值变更要靠
+    版本号显式重刷一次。
+    """
+
+    def _legacy(self, write_config, **overrides):
+        settings = {"min_similarity": 0, "proxy_mode": "on"}
+        settings.update(overrides)
+        write_config({"search_engines": [
+            {"name": "iqdb", "enabled": True, "priority": 1, "settings": dict(settings)},
+            {"name": "traceMoe", "enabled": True, "priority": 2, "settings": dict(settings)},
+            {"name": "sauceNAO", "enabled": True, "priority": 3, "settings": dict(settings)},
+        ]})
+
+    def test_stale_defaults_are_refreshed(self, write_config):
+        self._legacy(write_config)
+        s = EngineStore()
+        # 各引擎校准过的默认值应生效
+        assert s.get("iqdb").get("min_similarity") == 45
+        assert s.get("traceMoe").get("min_similarity") == 85
+        assert s.get("sauceNAO").get("min_similarity") == 60
+        assert s.get("iqdb").get("proxy_mode") == "auto"
+
+    def test_version_is_stamped(self, write_config):
+        from imgsearch.engines.store import _VERSION_KEY
+        import imgsearch.config as cfg
+        self._legacy(write_config)
+        EngineStore()
+        assert cfg.load_config().get(_VERSION_KEY) == 2
+
+    def test_migration_runs_only_once(self, write_config):
+        """迁移后用户自己设的值不能被下一次加载重置"""
+        self._legacy(write_config)
+        s = EngineStore()
+        s.update("iqdb", min_similarity=33)
+        s.update("sauceNAO", proxy_mode="off")
+
+        again = EngineStore()
+        assert again.get("iqdb").get("min_similarity") == 33, "迁移重复执行，覆盖了用户设置"
+        assert again.get("sauceNAO").get("proxy_mode") == "off"
+
+    def test_custom_engines_are_untouched(self, write_config):
+        """自定义引擎的字段可能是它自己的扩展，迁移不能乱动"""
+        write_config({"search_engines": [
+            {"name": "mine", "enabled": True, "priority": 1,
+             "module_path": "m", "class_name": "C",
+             "settings": {"min_similarity": 7}},
+        ]})
+        s = EngineStore()
+        assert s.get("mine").get("min_similarity") == 7
+
+    def test_fresh_install_gets_calibrated_defaults(self, store):
+        assert store.get("iqdb").get("min_similarity") == 45
+        assert store.get("traceMoe").get("min_similarity") == 85
+        assert store.get("sauceNAO").get("min_similarity") == 60

@@ -18,7 +18,7 @@ from dataclasses import dataclass, field as dc_field
 from typing import Any, Dict, List, Optional
 
 from imgsearch import secrets
-from imgsearch.config import get, save_config
+from imgsearch.config import get, save_configs
 from imgsearch.engines import registry
 from imgsearch.engines.registry import (
     canonical_name,
@@ -30,6 +30,9 @@ from imgsearch.engines.registry import (
 from imgsearch.engines.schema import ConfigError, Schema, check_cross_fields
 
 _CONFIG_KEY = "search_engines"
+# 引擎配置的结构版本，用于「字段默认值变更后需要重刷」这类迁移
+_VERSION_KEY = "search_engines_version"
+_SCHEMA_VERSION = 2
 
 # 结构性字段：不进 settings
 _STRUCTURAL_KEYS = ("name", "enabled", "priority", "module_path", "class_name", "settings")
@@ -219,12 +222,14 @@ class EngineStore:
     def load(self) -> None:
         """从 config.json 载入，必要时迁移旧格式并补全 schema 默认值"""
         raw = get(_CONFIG_KEY, None)
+        stored_version = int(get(_VERSION_KEY, 0) or 0)
         self._engines = self._migrate(raw)
+        migrated = self._migrate_schema_version(stored_version)
         self._loaded_mtime = self._current_mtime()
 
         # ⚠️ 这里必须用显式循环，不能写成 any(... for e in ...)：
         # any() 遇到第一个 True 就短路，排在后面的引擎就不会被补默认值了。
-        changed = False
+        changed = migrated
         for e in self._engines:
             if self._prune_stale_settings(e):
                 changed = True
@@ -232,6 +237,33 @@ class EngineStore:
                 changed = True
         if changed:
             self.save()
+
+    def _migrate_schema_version(self, stored_version: int) -> bool:
+        """
+        按版本号重刷那些「只补缺失键」覆盖不到的字段。
+
+        ``_apply_schema_defaults`` 只在键**不存在**时补默认值（这样才不会
+        把用户故意设的 0 / False 顶掉）。代价是：一旦某个字段先以旧默认值
+        落盘，之后我们再调整默认值就对它无效了 —— 升级上来的配置会一直用旧的。
+
+        所以字段默认值有变更时，在这里按版本号显式重刷一次。
+        只处理内置引擎：自定义引擎的字段可能是它自己的扩展，不能乱动。
+
+        v0 → v2：首次引入 min_similarity 与 proxy_mode。
+        """
+        if stored_version >= _SCHEMA_VERSION:
+            return False
+
+        if stored_version < 2:
+            for e in self._engines:
+                if not e.is_builtin:
+                    continue
+                # 这两个字段是本版新增的，任何已存在的值都只是中间态默认值，
+                # 删掉即可让 schema 里校准过的默认值生效
+                for key in ("min_similarity", "proxy_mode"):
+                    e.settings.pop(key, None)
+
+        return True
 
     def _prune_stale_settings(self, ec: EngineConfig) -> bool:
         """
@@ -346,7 +378,8 @@ class EngineStore:
         """写回 config.json（原子写）"""
         self._renumber(self._engines)
         payload = [e.to_dict() for e in self._engines]
-        save_config(_CONFIG_KEY, payload)
+        # 一次写入，避免版本号与内容不一致的中间状态
+        save_configs(**{_CONFIG_KEY: payload, _VERSION_KEY: _SCHEMA_VERSION})
         self._last_saved = payload
         self._loaded_mtime = self._current_mtime()
         # 配置变了，动态引擎类可能也要重新解析（例如改了 module_path，

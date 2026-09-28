@@ -88,7 +88,7 @@ SAUCENAO_KEY=xxx ./run.sh search 图片.jpg
 |---|---|---|---|
 | `sauceNAO` | 官方 API | ✅ 启用 | Pixiv 覆盖最好，需要 API Key |
 | `iqdb` | HTML 解析 | ✅ 启用 | IQDB 聚合：Danbooru / Konachan / yande.re / Gelbooru / Sankaku / e-shuushuu / Zerochan / Anime-Pictures。无需凭据 |
-| `ascii2d` | HTML 解析 | ⏸ 禁用 | 站点已对上传端点返回 403，备用图床也被阻断，暂不可用 |
+| `ascii2d` | HTML 解析 | ⏸ 禁用 | **已确认不可用**：上传端点被 Cloudflare WAF 挡（403，cloudscraper 无效），备用图床 catbox.moe 拒收（412）。仅保留实现供日后站点恢复 |
 | `traceMoe` | 官方 API | ⏸ 禁用 | 动画截图溯源（回答"第几集第几秒"）。**对插画会高分误报**，需要时用 `-e traceMoe` |
 | `danbooru` | 官方 API | ⏸ 禁用 | 需要账号（用户名 + API Key）|
 
@@ -118,6 +118,21 @@ IQDB 报 53%、SauceNAO 报 95%——用一刀切的阈值会把 IQDB 这类刻�
   ./run.sh engines config iqdb --set proxy_mode=on
   ```
 - 连接失败的引擎**不会**白等 `request_delay`（没发出去的请求不消耗配额）
+
+⚠️ **`cloudscraper` 与代理不兼容**：它自带一套模仿浏览器指纹的 SSL 上下文，
+经代理隧道时会在 TLS 握手阶段直接失败（实测 `SSLV3_ALERT_HANDSHAKE_FAILURE`，
+且用 `session.proxies` 或每次请求显式传 `proxies=` 都一样）。
+所以同时需要「代理 + CF 绕过」时，程序**优先保代理**并改用普通请求
+（能连上比绕过重要；何况 cloudscraper 也打不过现代 Cloudflare WAF）。
+
+实测连通性（本机 Clash，2026-09）：
+
+| 目标 | 直连 | 经代理 |
+|---|---|---|
+| saucenao.com / iqdb.org / api.trace.moe | ✅ | ✅ |
+| catbox.moe | ❌ | ✅ |
+| pixiv.net / i.pximg.net | ❌ | ✅ |
+| danbooru.donmai.us | ❌ 超时 | ✅ 403 |
 
 ---
 
@@ -209,10 +224,20 @@ image-search/
 - ⏳ 多格式导出（urls.txt / CSV / JSON / HTML 缩略图墙 / 剪贴板）
 - ⏳ GUI 迁移到 PySide6（Qt6）：原生拖拽、Schema 配置表单
 
-### 待验证（需开代理后复测）
+### 已在代理下复测（2026-09）
 
-- 🔎 **Ascii2D 是否真的不可用**：实测 `/search/color/` 返回 403、
-  备用图床 catbox.moe TLS 握手失败。但当时是外网/移动网络环境，
-  **403 可能与出口 IP 有关**，需在 Clash 代理下复测再定论
+- ✅ **Ascii2D 确认不可用**（原判断保留但已升级为定论）：
+  开后代理复测，`POST /search/color/` 在「直连 / 代理 / 换 Referer+Origin /
+  全浏览器头 / cloudscraper」**五种组合下一律 403**（Cloudflare WAF），
+  而首页 `GET /` 正常 200 —— 说明是该 POST 端点被规则拦，不是网络或请求头问题。
+  备用路径 catbox.moe 也拒收（412 Invalid uploader）。
+- ✅ 各引擎在代理下均正常：SauceNAO 95.2% 命中、IQDB 命中并抠出 post ID、
+  TraceMoe 正常返回（含片源文件名）
+- ✅ 按引擎代理路由验证通过：`proxy_mode=off` 的引擎确实走直连
+
+### 待办
+
 - 🔎 各引擎的 `min_similarity` 默认值是按少量样本校准的，
   建议用 `wating_for_search/` 批量实测后再微调
+- 🔎 Danbooru 经代理仍返回 403，需要账号凭据后再验证
+  （目前尚未配置 `DANBOORU_LOGIN` / `DANBOORU_API_KEY`）
