@@ -346,3 +346,37 @@ class TestSettingsPage:
         from imgsearch_gui.pages.settings_page import SettingsPage
         page = SettingsPage()
         assert "7897" in page.proxy_edit.placeholderText()
+
+
+class TestCredentialsPermissionDisplay:
+    """Windows 上没有 POSIX 权限位，凭据页不该给出无法修好的告警"""
+
+    def test_posix_shows_mode(self, qapp):
+        from imgsearch_gui.pages.credentials_page import CredentialsPage
+        secrets.set("SAUCENAO_KEY", "x")
+        page = CredentialsPage()
+        assert "权限" in page.path_label.text() or "600" in page.path_label.text()
+
+    def test_missing_file_is_explained(self, qapp):
+        from imgsearch_gui.pages.credentials_page import CredentialsPage
+        page = CredentialsPage()
+        assert "尚未创建" in page.path_label.text()
+
+
+class TestWindowGeometry:
+    """初始尺寸必须放得进屏幕可用区域"""
+
+    def test_fits_available_screen(self, qapp):
+        from imgsearch_gui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            screen = qapp.primaryScreen()
+            assert screen is not None
+            avail = screen.availableGeometry()
+            assert win.width() <= avail.width(), "窗口比屏幕还宽"
+            assert win.height() <= avail.height(), "窗口比屏幕还高"
+            # 最小尺寸也不能超过屏幕 —— 否则在小屏上窗口必然超出
+            assert win.minimumWidth() <= avail.width()
+            assert win.minimumHeight() <= avail.height()
+        finally:
+            win.close()

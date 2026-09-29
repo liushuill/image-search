@@ -59,6 +59,32 @@ run.bat engines list
 > 批处理文件刻意**只含 ASCII**：cmd.exe 是按当前代码页逐行解析 `.bat` 的，
 > 中文写在 `if` 块里很容易出问题。所有面向用户的提示都由 Python 打印。
 
+#### ⚠️ Windows 的验证状态（请如实看待）
+
+**开发与测试都在 Linux 上完成，本项目尚未在 Windows 实机上运行过。**
+已排除的障碍与尚未覆盖的风险分开列，避免"应该没问题"这种含糊说法：
+
+**已排除（可在 Linux 上验证的部分）**
+
+- 代码里没有平台特有 API（无 `os.startfile` / `winreg` / 硬编码盘符）
+- GUI **没有硬编码字体**（旧 tkinter 版写死了 `Microsoft YaHei UI`，Qt6 版没有）
+- 路径比较已按平台归一大小写（Windows 不敏感，否则重复/嵌套检测会失效）
+- venv 布局差异（`Scripts\python.exe`）由 `bootstrap.py` 统一处理
+- `.bat` 纯 ASCII、无 BOM、支持 `py -3`
+- 「解压后自动建环境」这条路径已实测（在 Linux 上跑的全新解压 → venv → 可用）
+- 417 项测试含 GUI 的 offscreen 测试（构造每个页面并走真实数据库路径）
+
+**尚未覆盖（需要 Windows 实机才能确认）**
+
+- 🔎 从未在 Windows 上启动过 PySide6 窗口
+- 🔎 从未执行过任何一个 `.bat`
+- 🔎 从资源管理器**拖拽**进窗口（`toLocalFile()` 在 Windows 返回 `C:/...`，理论上没问题）
+- 🔎 高 DPI 缩放下控件的实际观感（尺寸已做屏幕自适应，但字体/间距观感未经目视）
+- 🔎 中文路径、超长路径（Windows 仍限 260 字符，未做 `\\?\` 处理）
+- 🔎 杀毒软件/受控文件夹访问对 `.venv` 创建与 `.env` 写入的干扰
+
+如果 Windows 上出问题，最可能是上面这几条之一。把报错原文或截图给我即可。
+
 ### 直接调用（等价方式）
 
 ```bash
@@ -321,7 +347,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（383 项）
+├── tests/                     ← pytest（445 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏

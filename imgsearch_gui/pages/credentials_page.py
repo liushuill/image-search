@@ -13,7 +13,6 @@
 """
 
 import os
-import stat
 from pathlib import Path
 
 from PySide6 import QtCore, QtGui, QtWidgets
@@ -262,14 +261,12 @@ class CredentialsPage(QtWidgets.QWidget):
 
     def _update_info(self) -> None:
         path = Path(secrets.ENV_FILE)
-        if path.exists():
-            mode = stat.S_IMODE(path.stat().st_mode)
-            warn = "" if mode == 0o600 else f"　⚠️ 权限是 {oct(mode)}，应为 0o600"
-            self.path_label.setText(f"凭据文件：{path}{warn}")
-        else:
-            self.path_label.setText(
-                f"凭据文件：{path}（尚未创建，保存时会自动生成并设为 600）"
-            )
+        note, needs_attention = secrets.permission_status()
+        mark = "⚠️ " if needs_attention else ""
+        self.path_label.setText(f"凭据文件：{path}\n{mark}{note}")
+        self.path_label.setStyleSheet(
+            f"color:{style.WARN if needs_attention else style.MUTED};"
+        )
 
     def _update_save_state(self) -> None:
         pending = [r for r in self.rows.values() if r.pending_value()]

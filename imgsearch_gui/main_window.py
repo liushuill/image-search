@@ -27,8 +27,10 @@ class MainWindow(QtWidgets.QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("image-search · 二次元图片溯源")
-        self.resize(1180, 760)
-        self.setMinimumSize(940, 620)
+        # 初始尺寸按屏幕可用区域自适应。
+        # ⚠️ 写死 1180x760 在 150% 缩放的 1080p 笔记本上会超出屏幕
+        # （逻辑可用区只有约 1280x720），底部控件会被挤到屏幕外。
+        self._apply_initial_geometry()
 
         central = QtWidgets.QWidget()
         self.setCentralWidget(central)
@@ -116,6 +118,44 @@ class MainWindow(QtWidgets.QMainWindow):
 
         self._navs[0].setChecked(True)
         self.refresh_status()
+
+    # ── 窗口几何 ────────────────────────────────
+
+    # 偏好的初始尺寸与最小尺寸（放不下时会自动让步，见下）
+    _PREFERRED_SIZE = (1180, 760)
+    _PREFERRED_MIN = (820, 560)
+
+    def _apply_initial_geometry(self) -> None:
+        """
+        按屏幕可用区域挑一个放得下的初始尺寸，调整最小尺寸并居中。
+
+        ⚠️ 写死 1180x760 在 150% 缩放的 1080p 笔记本上会超出可用区
+        （逻辑区域只剩约 1280x720），底部按钮会被挤到屏幕外看不见。
+
+        ⚠️ 最小尺寸也要跟着屏幕收窄：否则在小屏上「最小尺寸」本身就比屏幕大，
+        窗口必然超出 —— 能不能放下比"保证最小可用尺寸"更重要。
+        """
+        pref_w, pref_h = self._PREFERRED_SIZE
+        pref_min_w, pref_min_h = self._PREFERRED_MIN
+
+        screen = QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self.setMinimumSize(pref_min_w, pref_min_h)
+            self.resize(pref_w, pref_h)
+            return
+
+        available = screen.availableGeometry()
+        min_w = min(pref_min_w, available.width())
+        min_h = min(pref_min_h, available.height())
+        self.setMinimumSize(min_w, min_h)
+
+        width = max(min_w, min(pref_w, available.width() - 40))
+        height = max(min_h, min(pref_h, available.height() - 40))
+        self.resize(width, height)
+        self.move(
+            available.x() + max(0, (available.width() - width) // 2),
+            available.y() + max(0, (available.height() - height) // 2),
+        )
 
     # ── 状态 ────────────────────────────────────
 

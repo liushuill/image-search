@@ -95,7 +95,7 @@ def _print_secrets():
         print(f"  {mark} {name:<18} {secrets.masked(name):<22} {desc}")
     if not any(c for _, c, _ in secrets.describe()):
         print()
-        print("  💡 初始化：cp .env.example .env && chmod 600 .env")
+        print(f"  💡 初始化：{secrets.init_hint()}")
     print(f"  📄 文件：{secrets.ENV_FILE}")
 
 

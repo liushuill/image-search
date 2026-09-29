@@ -16,6 +16,7 @@
 """
 
 import os
+import stat
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
@@ -32,6 +33,46 @@ KNOWN_SECRETS: Dict[str, str] = {
 
 # 运行时缓存：None 表示尚未加载
 _cache: Optional[Dict[str, str]] = None
+
+IS_WINDOWS = os.name == "nt"
+
+
+def permission_status(is_windows: Optional[bool] = None) -> Tuple[str, bool]:
+    """
+    描述凭据文件的保护状态。
+
+    Returns:
+        ``(给人看的说明, 是否需要提醒)``
+
+    ⚠️ **Windows 上没有 POSIX 权限位**：``chmod`` 只能表达只读位，
+    普通文件的 ``st_mode`` 恒为 0666/0444 之类。所以不能拿 0o600 去比对 ——
+    否则会显示一个在 Windows 上毫无意义的告警（而且用户无法「修好」它）。
+
+    做成可传参是为了能在 Linux 上验证 Windows 分支。
+    """
+    win = IS_WINDOWS if is_windows is None else is_windows
+
+    if not ENV_FILE.exists():
+        return ("尚未创建（保存凭据时会自动生成）", False)
+
+    if win:
+        return ("Windows 下无 POSIX 权限位；保护依赖账户与磁盘权限", False)
+
+    try:
+        mode = stat.S_IMODE(ENV_FILE.stat().st_mode)
+    except OSError:
+        return ("无法读取文件权限", True)
+
+    if mode == 0o600:
+        return ("权限 600（仅本人可读写）", False)
+    return (f"权限是 {oct(mode)}，建议收紧为 600", True)
+
+
+def init_hint() -> str:
+    """首次创建 .env 的命令（随平台变化）"""
+    if IS_WINDOWS:
+        return "copy .env.example .env"
+    return "cp .env.example .env && chmod 600 .env"
 
 
 # ──────────────────────────────────────────────
@@ -238,11 +279,22 @@ def describe() -> List[Tuple[str, bool, str]]:
     return [(name, is_set(name), desc) for name, desc in KNOWN_SECRETS.items()]
 
 
+# 短于这个长度的凭据一律完全隐藏。
+# 旧实现对短值返回 v[:2] + "****"，等于把 8 位密码的前 2 位直接印出来 ——
+# 脱敏的意义是「能认出是哪一个」，不是「透露一部分」。
+_MASK_MIN_LEN = 12
+
+
 def masked(name: str) -> str:
-    """脱敏显示，如 c2e8****1db5"""
+    """
+    脱敏显示：``c2e8****1db5``。
+
+    只有足够长的值才露出首尾各 4 位（便于认出是哪一个 key）；
+    短值一律返回 ``****``，避免泄露其中大部分内容。
+    """
     v = get(name)
     if not v:
         return "(未设置)"
-    if len(v) <= 10:
-        return v[:2] + "****"
+    if len(v) < _MASK_MIN_LEN:
+        return "****"
     return f"{v[:4]}****{v[-4:]}"
