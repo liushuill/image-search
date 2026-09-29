@@ -67,12 +67,15 @@ def add_parser(subparsers) -> None:
 def export_records(records: Sequence[ExportRecord], formats_text: str,
                    *, outdir=None, stem: Optional[str] = None,
                    name_template: Optional[str] = None,
-                   thumbnails: str = "embed") -> List[Path]:
+                   thumbnails: str = "embed"):
     """
     渲染并写出所选格式。
 
+    **刻意不做 UI 相关的事**（不设置剪贴板、不打印），
+    这样 CLI 与 GUI 都能用同一段逻辑，只是后续处理不同。
+
     Returns:
-        实际写入的文件路径（虚拟格式如剪贴板不在此列）
+        ``(写入的文件路径列表, 剪贴板文本或 "")``
     """
     formats = parse_format_list(formats_text)
     out_dir = Path(outdir) if outdir else Path(OUTPUT_DIR)
@@ -82,21 +85,24 @@ def export_records(records: Sequence[ExportRecord], formats_text: str,
                             name_template=name_template or "",
                             thumbnails=thumbnails)
 
-    # 虚拟格式单独处理：剪贴板
+    clipboard_text = ""
     for fmt in formats:
-        if fmt.key != "clipboard":
-            continue
-        text = fmt.render(records)
-        if copy_to_clipboard(text):
-            print("  📋 已复制到系统剪贴板")
-        else:
-            print("  📋 没有可用的剪贴板工具（wl-copy / xclip / xsel / clip）")
-            print("     以下内容可直接复制：")
-            print("-" * 50)
-            print(text.rstrip())
-            print("-" * 50)
+        if fmt.key == "clipboard":
+            clipboard_text = fmt.render(records)
 
-    return written
+    return written, clipboard_text
+
+
+def _handle_clipboard(text: str) -> None:
+    """CLI 场景下把文本放进系统剪贴板；没有工具就打印出来"""
+    if copy_to_clipboard(text):
+        print("  📋 已复制到系统剪贴板")
+        return
+    print("  📋 没有可用的剪贴板工具（wl-copy / xclip / xsel / clip）")
+    print("     以下内容可直接复制：")
+    print("-" * 50)
+    print(text.rstrip())
+    print("-" * 50)
 
 
 def _print_written(written: Sequence[Path]) -> None:
@@ -136,10 +142,9 @@ def run(args) -> int:
 
     print(f"📦 待导出 {len(records)} 条记录")
     try:
-        written = export_records(records, args.formats, outdir=args.outdir,
-                                 stem=args.stem,
-                                 name_template=args.name_template,
-                                 thumbnails=args.thumbnails)
+        written, clipboard_text = export_records(
+            records, args.formats, outdir=args.outdir, stem=args.stem,
+            name_template=args.name_template, thumbnails=args.thumbnails)
     except ValueError as e:                               # 格式名写错
         print(f"❌ {e}")
         print("\n可用格式：")
@@ -147,6 +152,8 @@ def run(args) -> int:
         return 1
 
     _print_written(written)
+    if clipboard_text:
+        _handle_clipboard(clipboard_text)
     print("\n💡 导出的是**地址**，不含图片文件本身。")
     return 0
 

@@ -231,3 +231,51 @@ class ProxyProbe(QtCore.QThread):
             self.done.emit(False,
                            f"代理不可用：{type(e).__name__}: {str(e)[:160]}\n"
                            "程序在代理不可用时会自动降级为直连，不影响使用。")
+
+
+class ExportWorker(QtCore.QThread):
+    """
+    在后台执行导出。
+
+    导出通常是秒级，但 HTML 报告要为每张图准备缩略图（必要时现场生成），
+    几百条就会明显卡顿 —— 所以仍然丢到后台，别让界面假死。
+    """
+
+    progress = QtCore.Signal(str)
+    done = QtCore.Signal(list, str)        # (写入的文件路径, 剪贴板文本)
+    failed = QtCore.Signal(str)
+
+    def __init__(self, records, formats_text: str, *, outdir=None, stem=None,
+                 name_template: str = "", thumbnails: str = "embed",
+                 parent=None):
+        super().__init__(parent)
+        self.records = list(records)
+        self.formats_text = formats_text
+        self.outdir = outdir
+        self.stem = stem
+        self.name_template = name_template
+        self.thumbnails = thumbnails
+
+    def run(self) -> None:  # noqa: D102
+        from imgsearch.exporters.cli import export_records
+
+        writer = _SignalWriter(self.progress.emit)
+        try:
+            with contextlib.redirect_stdout(writer):
+                written, clipboard_text = export_records(
+                    self.records, self.formats_text,
+                    outdir=self.outdir, stem=self.stem,
+                    name_template=self.name_template,
+                    thumbnails=self.thumbnails,
+                )
+        except ValueError as e:               # 格式名写错等，属于用户可修的问题
+            writer.flush()
+            self.failed.emit(str(e))
+            return
+        except Exception as e:                # noqa: BLE001
+            writer.flush()
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        finally:
+            writer.flush()
+        self.done.emit([str(p) for p in written], clipboard_text)

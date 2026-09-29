@@ -22,6 +22,8 @@ class SearchPage(QtWidgets.QWidget):
         super().__init__(parent)
         self._worker: SearchWorker | None = None
         self._image_path: str = ""
+        # 最近一次搜索的完整结果（导出时需要 dhash 与是否来自缓存）
+        self._last_outcome = None
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -115,6 +117,12 @@ class SearchPage(QtWidgets.QWidget):
         self.copy_btn.clicked.connect(self._copy_urls)
         self.copy_btn.setEnabled(False)
         status.addWidget(self.copy_btn)
+
+        self.export_btn = QtWidgets.QPushButton("导出结果…")
+        self.export_btn.setToolTip("勾选多种格式一次产出（URL 列表 / CSV / JSON / HTML 报告）")
+        self.export_btn.clicked.connect(self._export_results)
+        self.export_btn.setEnabled(False)
+        status.addWidget(self.export_btn)
 
         self.open_btn = QtWidgets.QPushButton("打开选中链接")
         self.open_btn.clicked.connect(self._open_selected)
@@ -244,8 +252,10 @@ class SearchPage(QtWidgets.QWidget):
         self.log.appendPlainText(line)
 
     def _on_done(self, outcome) -> None:
+        self._last_outcome = outcome
         self.table.set_results(outcome.results)
         self.copy_btn.setEnabled(bool(outcome.results))
+        self.export_btn.setEnabled(bool(outcome.results))
 
         if outcome.from_cache:
             self.status.setText(
@@ -274,6 +284,19 @@ class SearchPage(QtWidgets.QWidget):
         self._worker = None
         self.search_btn.setEnabled(bool(self._image_path))
         self.drop.set_busy(False)
+
+    def _export_results(self) -> None:
+        """把当前结果导出成多种格式"""
+        outcome = self._last_outcome
+        if outcome is None or not outcome.results:
+            return
+        from imgsearch.exporters import from_results
+        from imgsearch_gui.dialogs.export_dialog import ExportDialog
+
+        records = from_results(outcome.results, file=self._image_path,
+                              dhash=outcome.dhash,
+                              from_cache=outcome.from_cache)
+        ExportDialog(records, self, title="导出搜索结果").exec()
 
     # ── 结果操作 ────────────────────────────────
 

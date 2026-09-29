@@ -176,14 +176,19 @@ def cmd_search(args):
     # 顺便导出（导出的是地址，不含图片文件本身）
     if getattr(args, "export", None):
         from imgsearch.exporters import from_results
-        from imgsearch.exporters.cli import export_records, _print_written
+        from imgsearch.exporters.cli import (
+            _handle_clipboard, _print_written, export_records,
+        )
         records = from_results(results, file=image_path, dhash=outcome.dhash,
                               searched_at="", from_cache=outcome.from_cache)
         try:
-            written = export_records(records, args.export,
-                                     outdir=getattr(args, "outdir", None),
-                                     name_template=getattr(args, "name_template", None))
+            written, clipboard_text = export_records(
+                records, args.export,
+                outdir=getattr(args, "outdir", None),
+                name_template=getattr(args, "name_template", None))
             _print_written(written)
+            if clipboard_text:
+                _handle_clipboard(clipboard_text)
         except ValueError as e:
             print(f"\n⚠️ 导出失败：{e}")
 

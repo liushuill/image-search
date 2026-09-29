@@ -212,6 +212,11 @@ class LibraryPage(QtWidgets.QWidget):
         self.btn_open.clicked.connect(self._open_dir)
         ops.addWidget(self.btn_open)
 
+        self.btn_export = QtWidgets.QPushButton("导出图库…")
+        self.btn_export.setToolTip("把已经搜过的批量导出（勾选多条路径时以选中的为准）")
+        self.btn_export.clicked.connect(self._export)
+        ops.addWidget(self.btn_export)
+
         ops.addStretch(1)
         self.btn_remove = QtWidgets.QPushButton("移除路径")
         self.btn_remove.setObjectName("Danger")
@@ -413,6 +418,42 @@ class LibraryPage(QtWidgets.QWidget):
             lambda db, store: RootManager(db).set_label(root.id, label.strip())
         )
         self.reload()
+
+    def _export(self) -> None:
+        """
+        导出图库。
+
+        选中某条根路径时只导出它；没有选中则导出全部。
+        """
+        from imgsearch.exporters import from_library
+        from imgsearch_gui.dialogs.export_dialog import ExportDialog
+
+        root_id = self._selected_root_id()
+        scope = "全部路径" if root_id is None else "选中的路径"
+
+        QtWidgets.QApplication.setOverrideCursor(QtCore.Qt.WaitCursor)
+        try:
+            records = self._with_library(
+                lambda db, store: from_library(store, root_id=root_id)
+            )
+        except Exception as e:                            # noqa: BLE001
+            QtWidgets.QApplication.restoreOverrideCursor()
+            QtWidgets.QMessageBox.warning(self, "无法导出",
+                                          f"收集图库数据失败：{e}")
+            return
+        finally:
+            QtWidgets.QApplication.restoreOverrideCursor()
+
+        if not records:
+            QtWidgets.QMessageBox.information(
+                self, "没有可导出的数据",
+                f"{scope}下还没有任何搜索结果。\n"
+                "先搜索几张图，或用「搜索」页搜完再回来。"
+            )
+            return
+
+        ExportDialog(records, self,
+                     title=f"导出图库（{scope}）").exec()
 
     def _open_dir(self) -> None:
         root = self._selected_root()
