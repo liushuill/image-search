@@ -2,8 +2,14 @@
 搜索引擎基类与统一结果模型
 """
 
+import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+
+# 从来源链接里认出 Pixiv 作品 ID 的两种写法：
+#   新式  https://www.pixiv.net/artworks/74267012
+#   旧式  https://www.pixiv.net/member_illust.php?mode=medium&illust_id=74267012
+_PIXIV_ID_RE = re.compile(r"(?:artworks/|illust_id=)(\d+)")
 
 from imgsearch.engines.schema import COMMON_SCHEMA, Schema
 
@@ -78,6 +84,18 @@ class SearchResult:
             self.similarity = float(self.similarity or 0)
         except (TypeError, ValueError):
             self.similarity = 0.0
+
+        # ⚠️ pixiv_id 缺失时从来源链接里补出来。
+        # 实测：SauceNAO 命中 Danbooru/Gelbooru 索引时，data 里没有 pixiv_id 字段，
+        # 但 ext_urls 里带着旧式的 member_illust.php?...illust_id=NNN。
+        # 不补的话这个 ID 就丢了 —— 而它正是生成 pixiv.re / pixiv.cat
+        # 下载直链（AriaNg 批量下载）所必需的东西。
+        if not self.pixiv_id:
+            for url in self.ext_urls:
+                found = _PIXIV_ID_RE.search(url)
+                if found:
+                    self.pixiv_id = found.group(1)
+                    break
 
     def is_valid(self) -> bool:
         """判断结果是否有可用信息"""

@@ -26,6 +26,7 @@ class SearchOutcome:
     from_cache: bool = False           # 结果来自图库缓存（未消耗配额）
     record_id: Optional[int] = None    # 图库记录 id（未入库时为 None）
     match_kind: Optional[str] = None   # exact / scaled / similar
+    dhash: str = ""                    # 内容指纹，导出时用
     library_error: Optional[str] = None
 
     @property
@@ -138,11 +139,14 @@ def report_cache_hit(match, results: List[SearchResult]) -> None:
 
 
 def record_to_library(store: LibraryStore, image_path: str,
-                      results: List[SearchResult]) -> Optional[int]:
+                      results: List[SearchResult]):
     """
     把搜索结果记入图库（含缩略图缓存）。
 
     失败不打断主流程 —— 搜索本身已经成功了。
+
+    Returns:
+        写入的 :class:`ImageRecord`；失败返回 None
     """
     try:
         rec = store.upsert_image(image_path)
@@ -151,7 +155,7 @@ def record_to_library(store: LibraryStore, image_path: str,
             from imgsearch.library import thumbs
             thumbs.ensure(rec.dhash, image_path)
         print(f"\n📚 已记入图库（记录 id={rec.id}）—— 下次同图可直接复用结果")
-        return rec.id
+        return rec
     except Exception as e:
         print(f"\n  ⚠️ 记入图库失败：{e}")
         return None
@@ -192,6 +196,7 @@ def search_with_cache(
                 outcome.from_cache = True
                 outcome.record_id = match.record.id
                 outcome.match_kind = match.kind
+                outcome.dhash = match.record.dhash
                 report_cache_hit(match, cached)
                 return outcome
 
@@ -202,6 +207,9 @@ def search_with_cache(
     outcome.results = results
 
     if store is not None and results:
-        outcome.record_id = record_to_library(store, image_path, results)
+        rec = record_to_library(store, image_path, results)
+        if rec is not None:
+            outcome.record_id = rec.id
+            outcome.dhash = rec.dhash
 
     return outcome

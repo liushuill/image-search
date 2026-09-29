@@ -320,10 +320,11 @@ class LibraryStore:
             "SELECT * FROM results WHERE image_id = ? ORDER BY similarity DESC, id",
             (image_id,),
         )
-        return [self._row_to_result(r) for r in rows]
+        return [self.row_to_result(r) for r in rows]
 
     @staticmethod
-    def _row_to_result(row) -> SearchResult:
+    def row_to_result(row) -> SearchResult:
+        """图库 results 行 → SearchResult（与刚搜出来的形状一致）"""
         def _json(text, fallback):
             try:
                 return json.loads(text) if text else fallback

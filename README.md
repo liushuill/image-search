@@ -256,6 +256,52 @@ meta    (key, value)                                   内部元信息
 
 ---
 
+## 导出
+
+导出**不下载任何文件**，只输出地址。可一次勾选多种格式。
+
+```bash
+# 从本地图库导出（把已经搜过的批量导出）
+./run.sh export --library --formats all -o ./out
+./run.sh export --library 3 -f urls,html            # 限定某条根路径
+
+# 从旧版 batch 产出的 CSV 导出
+./run.sh export --csv search_results.csv -f urls,csv,json
+
+# 搜完顺便导出
+./run.sh search 图片.jpg --export urls,csv,html -o ./out
+```
+
+| 格式 | 扩展名 | 说明 |
+|---|---|---|
+| `urls` | `.txt` | 一行一个 URL —— 最通用，AriaNg / `aria2c -i` / IDM 批量导入都能吃 |
+| `csv` | `.csv` | 表格；`similarity` 是**数值**（可直接排序），带 BOM 便于 Excel 认中文 |
+| `json` | `.json` | 数组，字段完整、容器保持结构（`pixiv` 子对象 / `ids` 字典） |
+| `jsonl` | `.jsonl` | 一行一条，便于流式处理 |
+| `html` | `.html` | **缩略图墙报告**：单文件可离线打开，缩略图默认内嵌，带筛选框 |
+| `clipboard` | — | 不写文件；GUI 直接进剪贴板，CLI 用 `wl-copy`/`xclip`/`xsel`/`clip`，都没有就打印出来 |
+
+### 文件名模板
+
+```bash
+./run.sh export --library -f csv --name-template "{artist} - {title} ({pixiv_id})"
+```
+
+占位符：`{pixiv_id}` `{page}` `{artist}` `{title}` `{similarity}` `{engine}`
+`{dhash}` `{file}` `{ext}`。未知占位符**原样保留**（静默丢字段比留个
+`{unknown}` 更难排查）。非法字符会按 Windows+POSIX 的并集清理。
+
+### 一个被修掉的数据缺口
+
+SauceNAO 命中 Danbooru/Gelbooru 索引时，`data` 里**没有 `pixiv_id` 字段**，
+但 `ext_urls` 里带着旧式的 `member_illust.php?...illust_id=NNN`。
+旧实现只读字段，于是这个 ID 就丢了 —— 而它正是生成 `pixiv.re` / `pixiv.cat`
+下载直链（AriaNg 批量下载）所必需的东西。
+
+现在 `SearchResult` 会从来源链接里把 Pixiv ID 补出来（新旧两种 URL 写法都认），
+并且**已有的值不会被覆盖**。这条修复对缓存记录同样生效 ——
+导出走的是与「刚搜出来」完全相同的归一化路径。
+
 ## 搜索引擎
 
 ```bash
@@ -344,11 +390,15 @@ image-search/
 │   │   ├── store.py           ←   按内容查找与写入、缓存结果复用
 │   │   ├── thumbs.py          ←   按内容存放的缩略图缓存
 │   │   └── cleanup.py         ←   占用统计与清理（含 VACUUM 回收）
+│   ├── exporters/             ← 导出（不下载，只出地址）
+│   │   ├── base.py            ←   记录模型 / 文件名模板 / 格式注册表
+│   │   ├── collect.py         ←   从 搜索结果 / 图库 / CSV 收集
+│   │   └── urls / tabular / structured / html_report / clipboard_format
 │   ├── links/pixiv.py         ← Pixiv 图片直链模板管理
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（449 项）
+├── tests/                     ← pytest（512 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏

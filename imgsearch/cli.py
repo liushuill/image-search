@@ -173,6 +173,20 @@ def cmd_search(args):
     # 显示结果
     print_results(results)
 
+    # 顺便导出（导出的是地址，不含图片文件本身）
+    if getattr(args, "export", None):
+        from imgsearch.exporters import from_results
+        from imgsearch.exporters.cli import export_records, _print_written
+        records = from_results(results, file=image_path, dhash=outcome.dhash,
+                              searched_at="", from_cache=outcome.from_cache)
+        try:
+            written = export_records(records, args.export,
+                                     outdir=getattr(args, "outdir", None),
+                                     name_template=getattr(args, "name_template", None))
+            _print_written(written)
+        except ValueError as e:
+            print(f"\n⚠️ 导出失败：{e}")
+
     if outcome.from_cache:
         print("💡 这是缓存结果；要重新联网搜索请加 --refresh")
 
@@ -564,6 +578,10 @@ def main():
     from imgsearch.library.cli import add_parser as _add_library_parser
     _add_library_parser(subparsers)
 
+    # export 子命令（实现在 imgsearch/exporters/cli.py）
+    from imgsearch.exporters.cli import add_parser as _add_export_parser
+    _add_export_parser(subparsers)
+
     # search 子命令
     search_parser = subparsers.add_parser("search", help="搜索单张图片来源")
     search_parser.add_argument("path", help="图片文件路径")
@@ -576,6 +594,19 @@ def main():
         "--url", "-u",
         action="store_true",
         help="搜索后生成 Pixiv 图片 URL",
+    )
+    search_parser.add_argument(
+        "--export", default=None, metavar="格式列表",
+        help="搜索完顺便导出，如 urls,csv,html（可用 all 表示全部）",
+    )
+    search_parser.add_argument(
+        "--outdir", "-o", default=None,
+        help="导出目录（默认 output/）",
+    )
+    search_parser.add_argument(
+        "--name-template", default=None,
+        help="文件名模板，占位符：{pixiv_id} {page} {artist} {title} "
+             "{similarity} {engine} {dhash} {file} {ext}",
     )
     search_parser.add_argument(
         "--refresh", action="store_true",
@@ -693,6 +724,9 @@ def main():
 
     if args.command == "search":
         cmd_search(args)
+    elif args.command == "export":
+        from imgsearch.exporters.cli import run as run_export
+        sys.exit(run_export(args))
     elif args.command == "library":
         from imgsearch.library import LibraryError as _LibErr
         from imgsearch.library.cli import run as run_library
