@@ -42,10 +42,22 @@ run-gui.bat           # Windows
 
 ### Windows
 
+**只要设备上有 Python 3.10+ 即可**，不需要额外装任何东西：
+
 ```bat
-run.bat search 图片.jpg
-run.bat batch 待查目录
+run-gui.bat                        :: 图形界面（首次自动装 PySide6）
+run.bat search 图片.jpg            :: 命令行
+run.bat engines list
 ```
+
+首次运行会自动创建 `.venv` 并安装依赖。若提示找不到 Python：
+
+- 到 <https://www.python.org/downloads/> 安装，**安装时勾选 "Add python.exe to PATH"**
+- 装完**关掉再重开**命令行窗口（PATH 才会刷新）
+- 启动脚本会优先用 `py -3`（Python 官方启动器），没有才退回 `python`
+
+> 批处理文件刻意**只含 ASCII**：cmd.exe 是按当前代码页逐行解析 `.bat` 的，
+> 中文写在 `if` 块里很容易出问题。所有面向用户的提示都由 Python 打印。
 
 ### 直接调用（等价方式）
 
@@ -323,6 +335,21 @@ image-search/
 └── requirements*.txt          ← 依赖（唯一的依赖声明来源）
 ```
 
+### 启动引导（跨平台）
+
+`run.sh` / `run-gui.sh` / `run.bat` / `run-gui.bat` 都只是**薄封装**，
+真正的逻辑在 [`bootstrap.py`](bootstrap.py)：找/建 venv、按需装依赖、启动目标模块。
+
+这么分层的原因：
+
+1. **两个平台共用一套行为** —— 不会出现「Linux 那份改了、Windows 那份忘了」
+2. **batch 只剩几行 ASCII** —— 规避 cmd 代码页的坑
+3. **这段逻辑能被真实测试**（见 `tests/test_bootstrap.py`）——
+   否则发出去的就是一段从未运行过的 Windows 脚本
+
+依赖是否齐备靠「能不能 import 哨兵包」判断（`requests` / `PySide6`），
+而不是靠标记文件 —— 标记文件会跟实际状态不一致。
+
 ### 加一个搜索引擎
 
 架构目标是**只写一个文件**：
@@ -353,6 +380,18 @@ image-search/
 > `pyproject.toml` 刻意**不重复声明依赖**，避免同一事实写在多处。
 
 ---
+
+## 平台差异
+
+| 项 | 处理方式 |
+|---|---|
+| **路径大小写** | Windows 路径不区分大小写。所有根路径比较都按平台归一（`casefold`），否则 `C:\Images` 与 `c:\images` 会被当成两条路径 —— 重复登记与嵌套检测会双双失效 |
+| **跨盘符** | `os.path.relpath` 在 Windows 跨盘符会抛异常，已捕获并退化为空相对路径 |
+| **venv 布局** | POSIX 是 `bin/python`，Windows 是 `Scripts/python.exe`，由 `bootstrap.py` 统一处理 |
+| **控制台编码** | `.bat` 保持纯 ASCII；CLI 在需要时把 stdout 重新包装成 UTF-8（且会先确认对方有 `.buffer`） |
+| **文件锁与 WAL** | Windows 上 `os.replace` 与 WAL 均可用；⚠️ 但**不要把 `data/` 放到网络盘**（NFS/SMB），WAL 依赖同目录共享内存，网络文件系统上会损坏数据 |
+| **长路径** | Windows 仍有 260 字符上限；库路径过深时可能失败（未做 `\\?\` 前缀处理） |
+| **emoji 输出** | CLI 输出含 emoji（✅🔍📚）。Windows 终端 `chcp 65001` 下可能显示为方框，但不影响功能 |
 
 ## 迁移状态（v0.2）
 

@@ -205,3 +205,88 @@ def _write_pattern_image(path, seed=0, size=(90, 70)):
     path.parent.mkdir(parents=True, exist_ok=True)
     img.save(path)
     return path
+
+
+class TestCaseInsensitivePaths:
+    """
+    Windows 的路径**不区分大小写**，POSIX 区分。
+
+    之前所有路径比较都是直接的字符串比较，于是 Windows 上
+    ``C:\\Images`` 与 ``c:\\images`` 会被当成两条不同路径 ——
+    「重复登记」与「嵌套检测」双双失效，同一张图会被记两次。
+
+    用显式参数开启该语义，而不是依赖 os.name，这样在 Linux 上也能验证。
+    """
+
+    def test_default_follows_platform(self, roots):
+        assert roots.case_insensitive == (os.name == "nt")
+
+    def test_duplicate_detected_across_case(self, tmp_path):
+        (tmp_path / "Images").mkdir()
+        (tmp_path / "images").mkdir()          # Linux 上两者可并存
+        with LibraryDB(tmp_path / "ci.db") as db:
+            rm = RootManager(db, case_insensitive=True)
+            rm.add(str(tmp_path / "Images"))
+            with pytest.raises(LibraryError, match="已经登记过了"):
+                rm.add(str(tmp_path / "images"))
+
+    def test_nesting_detected_across_case(self, tmp_path):
+        (tmp_path / "Images" / "Sub").mkdir(parents=True)
+        (tmp_path / "images").mkdir()
+        with LibraryDB(tmp_path / "ci2.db") as db:
+            rm = RootManager(db, case_insensitive=True)
+            rm.add(str(tmp_path / "Images"))
+            with pytest.raises(LibraryError, match="位于已登记的根路径之内"):
+                rm.add(str(tmp_path / "images" / "sub"))
+
+    def test_get_finds_root_regardless_of_case(self, tmp_path):
+        (tmp_path / "MixedCase").mkdir()
+        with LibraryDB(tmp_path / "ci3.db") as db:
+            rm = RootManager(db, case_insensitive=True)
+            root = rm.add(str(tmp_path / "MixedCase"))
+            assert rm.get(str(tmp_path / "MixedCase").upper()) is not None
+            assert rm.get(str(tmp_path / "mixedcase")) is not None
+            assert rm.get(root.id).id == root.id
+
+    def test_roots_containing_across_case(self, tmp_path):
+        (tmp_path / "Images").mkdir()
+        with LibraryDB(tmp_path / "ci4.db") as db:
+            rm = RootManager(db, case_insensitive=True)
+            rm.add(str(tmp_path / "Images"))
+            hits = rm.roots_containing(str(tmp_path / "IMAGES" / "a.png"))
+            assert len(hits) == 1
+
+    def test_posix_semantics_keep_them_distinct(self, tmp_path):
+        """POSIX 下大小写不同就是两条路径，不该被误判为重复"""
+        if os.name == "nt":
+            pytest.skip("仅验证 POSIX 语义")
+        (tmp_path / "Images").mkdir()
+        (tmp_path / "images").mkdir()
+        with LibraryDB(tmp_path / "cs.db") as db:
+            rm = RootManager(db, case_insensitive=False)
+            rm.add(str(tmp_path / "Images"))
+            rm.add(str(tmp_path / "images"))   # 应当允许
+            assert len(rm.list()) == 2
+
+    def test_relocate_respects_case_semantics(self, tmp_path):
+        """
+        搬到「大小写不同但实为同一路径」的位置时也要拦住。
+
+        注意要**存在另一条根路径**才构成冲突 —— 只把自己改个名不算冲突
+        （自己会被 exclude 掉）。
+        """
+        (tmp_path / "A").mkdir()
+        (tmp_path / "B").mkdir()
+        (tmp_path / "b").mkdir()
+        with LibraryDB(tmp_path / "ci5.db") as db:
+            rm = RootManager(db, case_insensitive=True)
+            root_a = rm.add(str(tmp_path / "A"))
+            rm.add(str(tmp_path / "B"))
+            # 把 A 搬到 b/inside —— 按 Windows 语义这落在 B 里面
+            with pytest.raises(LibraryError, match="重叠"):
+                rm.relocate(root_a.id, str(tmp_path / "b" / "inside"))
+
+    def test_path_key_helper(self):
+        from imgsearch.library.paths import path_key
+        assert path_key("/a/B", case_insensitive=True) == path_key("/a/b", True)
+        assert path_key("/a/B", case_insensitive=False) != path_key("/a/b", False)

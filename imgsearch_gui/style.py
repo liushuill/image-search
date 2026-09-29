@@ -16,10 +16,6 @@ MUTED = "#6b7280"
 BORDER = "#e5e7eb"
 HOVER = "#f3f4f6"
 
-# 等宽字体候选（跨平台，取第一个可用的）
-MONO_FAMILIES = ("Cascadia Mono", "Consolas", "JetBrains Mono",
-                 "DejaVu Sans Mono", "Noto Sans Mono", "monospace")
-
 QSS = f"""
 QWidget {{
     background: {BG};

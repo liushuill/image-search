@@ -40,12 +40,37 @@ def normalize_path(raw: Union[str, Path]) -> str:
     return os.path.realpath(os.path.abspath(text))
 
 
-def _is_ancestor_or_same(a: str, b: str) -> bool:
+def default_case_insensitive() -> bool:
+    """
+    本机文件系统的路径是否大小写不敏感。
+
+    Windows 不区分大小写，而 POSIX 区分 —— 这决定了「同一路径」的判定方式。
+    做成函数（而不是直接在代码里读 os.name）是为了**能被测试**：
+    Linux 上没法真的验证 Windows 语义，但可以显式传参来验证这段逻辑本身。
+    """
+    return os.name == "nt"
+
+
+def path_key(path: str, case_insensitive: bool) -> str:
+    """
+    路径比较用的规范形式。
+
+    ⚠️ Windows 上必须归一大小写，否则 ``C:\\Images`` 与 ``c:\\images``
+    会被当成两条不同路径 —— 于是「重复登记」和「嵌套检测」双双失效，
+    同一张图会被记两次（正是这两道检查要防的事）。
+    """
+    text = os.path.normpath(path)
+    return text.casefold() if case_insensitive else text
+
+
+def _is_ancestor_or_same(a: str, b: str, case_insensitive: bool = False) -> bool:
     """a 是否等于 b，或 b 位于 a 之内"""
+    ka = path_key(a, case_insensitive)
+    kb = path_key(b, case_insensitive)
     try:
-        return os.path.commonpath([a, b]) == a
+        return os.path.commonpath([ka, kb]) == ka
     except ValueError:
-        # 不同盘符（Windows）或无法比较
+        # 不同盘符（Windows 的 C: 与 D:）或无法比较
         return False
 
 
@@ -77,8 +102,17 @@ class Root:
 class RootManager:
     """根路径的增删查改"""
 
-    def __init__(self, db: LibraryDB):
+    def __init__(self, db: LibraryDB,
+                 case_insensitive: Optional[bool] = None):
         self.db = db
+        # None → 按本机文件系统的惯例；显式传值主要供测试使用
+        self.case_insensitive = (
+            default_case_insensitive() if case_insensitive is None
+            else case_insensitive
+        )
+
+    def _key(self, path: str) -> str:
+        return path_key(path, self.case_insensitive)
 
     # ── 查 ──────────────────────────────────────
 
@@ -91,14 +125,17 @@ class RootManager:
 
     def get(self, ident: Union[int, str]) -> Optional[Root]:
         """按 id 或路径取根路径"""
-        row = None
         if isinstance(ident, int):
             row = self.db.query_one("SELECT * FROM roots WHERE id = ?", (ident,))
-        else:
-            row = self.db.query_one(
-                "SELECT * FROM roots WHERE path = ?", (normalize_path(ident),)
-            )
-        return self._row_to_root(row) if row else None
+            return self._row_to_root(row) if row else None
+
+        # 按路径查找：不能直接用 SQL 的 `path = ?`（那边区分大小写），
+        # 在 Python 侧用规范形式比对。根路径只有几条，开销可忽略。
+        target = self._key(normalize_path(ident))
+        for root in self.list():
+            if self._key(root.path) == target:
+                return root
+        return None
 
     @staticmethod
     def _row_to_root(row) -> Root:
@@ -121,19 +158,21 @@ class RootManager:
         for root in self.list():
             if exclude_id is not None and root.id == exclude_id:
                 continue
-            if root.path == target:
+            if self._key(root.path) == self._key(target):
                 return root
             # 任一方包含另一方，都会导致同一文件被两条路径覆盖
-            if _is_ancestor_or_same(root.path, target):
+            ci = self.case_insensitive
+            if _is_ancestor_or_same(root.path, target, ci):
                 return root
-            if _is_ancestor_or_same(target, root.path):
+            if _is_ancestor_or_same(target, root.path, ci):
                 return root
         return None
 
     def roots_containing(self, file_path: str) -> List[Root]:
         """文件落在哪些根路径下（按路径长度降序，最具体的在前）"""
         target = normalize_path(file_path)
-        hits = [r for r in self.list() if _is_ancestor_or_same(r.path, target)]
+        ci = self.case_insensitive
+        hits = [r for r in self.list() if _is_ancestor_or_same(r.path, target, ci)]
         return sorted(hits, key=lambda r: len(r.path), reverse=True)
 
     # ── 增 ──────────────────────────────────────
@@ -152,9 +191,10 @@ class RootManager:
 
         conflict = self.find_conflict(target)
         if conflict is not None:
-            if conflict.path == target:
+            ci = self.case_insensitive
+            if self._key(conflict.path) == self._key(target):
                 raise LibraryError(f"该路径已经登记过了：\n  {target}")
-            if _is_ancestor_or_same(conflict.path, target):
+            if _is_ancestor_or_same(conflict.path, target, ci):
                 raise LibraryError(
                     f"路径重叠：新路径位于已登记的根路径之内\n"
                     f"  已有：{conflict.path}\n"

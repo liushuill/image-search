@@ -1,34 +1,49 @@
 @echo off
-rem ─────────────────────────────────────────────────────────────
-rem image-search CLI 启动器（Windows）
+rem ---------------------------------------------------------------
+rem image-search CLI launcher (Windows)
 rem
-rem   run.bat search 图片.jpg
-rem   run.bat batch 待查目录
+rem   run.bat search image.jpg
 rem   run.bat engines list
 rem
-rem 首次运行会自动创建 .venv 并安装依赖。
-rem ─────────────────────────────────────────────────────────────
-chcp 65001 >nul
+rem This file is intentionally ASCII-only: cmd.exe parses batch files
+rem using the active code page, and non-ASCII text inside if-blocks is a
+rem common source of breakage. All user-facing messages come from
+rem bootstrap.py instead (Python handles UTF-8 reliably).
+rem
+rem The real bootstrap logic lives in bootstrap.py so that Windows and
+rem Linux share one implementation.
+rem ---------------------------------------------------------------
 setlocal
 
-set "REPO_DIR=%~dp0"
-set "VENV=%REPO_DIR%.venv"
-set "PY=%VENV%\Scripts\python.exe"
-
-if not exist "%PY%" (
-    echo 首次运行：正在创建虚拟环境 .venv ...
-    python -m venv "%VENV%"
-    "%PY%" -m pip install --quiet --upgrade pip
-    echo 正在安装依赖（首次约 1-2 分钟）...
-    "%PY%" -m pip install --quiet -r "%REPO_DIR%requirements.txt"
-    rem 可选：注册 imgsearch 命令（失败不影响使用，下面用 PYTHONPATH 兜底）
-    "%PY%" -m pip install --quiet --no-deps -e "%REPO_DIR%"
-    echo 依赖安装完成。
+set "BOOT=%~dp0bootstrap.py"
+if not exist "%BOOT%" (
+    echo [ERROR] bootstrap.py not found next to this script.
+    exit /b 1
 )
 
-if not exist "%REPO_DIR%.env" (
-    echo 提示：尚未配置凭据。可执行  copy .env.example .env  后填入 SAUCENAO_KEY
+rem Prefer the "py" launcher (handles multiple installed versions),
+rem then fall back to a plain "python" on PATH.
+where py >nul 2>&1
+if %errorlevel% equ 0 (
+    py -3 "%BOOT%" cli %*
+    exit /b %errorlevel%
 )
 
-set "PYTHONPATH=%REPO_DIR%"
-"%PY%" -m imgsearch %*
+where python >nul 2>&1
+if %errorlevel% equ 0 (
+    python "%BOOT%" cli %*
+    exit /b %errorlevel%
+)
+
+echo.
+echo [ERROR] Python 3 was not found on this system.
+echo.
+echo   Install Python 3.10 or newer, and make sure "Add python.exe to PATH"
+echo   is checked during setup:
+echo.
+echo       https://www.python.org/downloads/
+echo.
+echo   If you just installed it, close and reopen this window so PATH refreshes.
+echo.
+pause
+exit /b 1

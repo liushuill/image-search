@@ -1,32 +1,41 @@
 @echo off
-rem ─────────────────────────────────────────────────────────────
-rem image-search 图形界面启动器（Windows）
+rem ---------------------------------------------------------------
+rem image-search GUI launcher (Windows)
 rem
 rem   run-gui.bat
 rem
-rem 首次运行会自动创建 .venv 并安装 GUI 依赖（PySide6 / Qt6）。
-rem ─────────────────────────────────────────────────────────────
-chcp 65001 >nul
+rem Creates .venv and installs PySide6 (Qt6) on first run.
+rem ASCII-only by design -- see the note in run.bat.
+rem ---------------------------------------------------------------
 setlocal
 
-set "REPO_DIR=%~dp0"
-set "VENV=%REPO_DIR%.venv"
-set "PY=%VENV%\Scripts\python.exe"
-
-if not exist "%PY%" (
-    echo 首次运行：正在创建虚拟环境 .venv ...
-    python -m venv "%VENV%"
-    "%PY%" -m pip install --quiet --upgrade pip
-    echo 正在安装依赖（首次约 2-3 分钟，PySide6 较大）...
-    "%PY%" -m pip install --quiet -r "%REPO_DIR%requirements-gui.txt"
-    "%PY%" -m pip install --quiet --no-deps -e "%REPO_DIR%"
+set "BOOT=%~dp0bootstrap.py"
+if not exist "%BOOT%" (
+    echo [ERROR] bootstrap.py not found next to this script.
+    exit /b 1
 )
 
-"%PY%" -c "import PySide6" >nul 2>&1
-if errorlevel 1 (
-    echo 正在安装 GUI 依赖 PySide6 ...
-    "%PY%" -m pip install --quiet PySide6
+where py >nul 2>&1
+if %errorlevel% equ 0 (
+    py -3 "%BOOT%" gui %*
+    exit /b %errorlevel%
 )
 
-set "PYTHONPATH=%REPO_DIR%"
-"%PY%" -m imgsearch_gui %*
+where python >nul 2>&1
+if %errorlevel% equ 0 (
+    python "%BOOT%" gui %*
+    exit /b %errorlevel%
+)
+
+echo.
+echo [ERROR] Python 3 was not found on this system.
+echo.
+echo   Install Python 3.10 or newer, and make sure "Add python.exe to PATH"
+echo   is checked during setup:
+echo.
+echo       https://www.python.org/downloads/
+echo.
+echo   If you just installed it, close and reopen this window so PATH refreshes.
+echo.
+pause
+exit /b 1
