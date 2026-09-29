@@ -80,7 +80,8 @@ run.bat engines list
 - 🔎 从未执行过任何一个 `.bat`
 - 🔎 从资源管理器**拖拽**进窗口（`toLocalFile()` 在 Windows 返回 `C:/...`，理论上没问题）
 - 🔎 高 DPI 缩放下控件的实际观感（尺寸已做屏幕自适应，但字体/间距观感未经目视）
-- 🔎 中文路径、超长路径（Windows 仍限 260 字符，未做 `\\?\` 处理）
+- 🔎 中文路径、超长路径（Windows 仍限 260 字符，未做 `\\?\` 前缀处理 ——
+  注意这与**分隔符**无关，前者已处理并有测试守着）
 - 🔎 杀毒软件/受控文件夹访问对 `.venv` 创建与 `.env` 写入的干扰
 
 如果 Windows 上出问题，最可能是上面这几条之一。把报错原文或截图给我即可。
@@ -412,7 +413,9 @@ image-search/
 | 项 | 处理方式 |
 |---|---|
 | **路径大小写** | Windows 路径不区分大小写。所有根路径比较都按平台归一（`casefold`），否则 `C:\Images` 与 `c:\images` 会被当成两条路径 —— 重复登记与嵌套检测会双双失效 |
+| **路径分隔符** | ✅ **已处理，且不手写**。所有路径都交给 `os.path` / `pathlib`：`normpath` 会把 `C:/a/b` 归一成 `C:\a\b`，`commonpath`/`relpath` 也吃混合分隔符。**代码里没有任何 `split("/")` / `replace("\\","/")` 式的路径拼接**（这类手写正是跨平台路径 bug 的经典根因）。已用 `ntpath` 在 Linux 上验证 Windows 语义，并有守卫测试禁止以后手写 |
 | **跨盘符** | `os.path.relpath` 在 Windows 跨盘符会抛异常，已捕获并退化为空相对路径 |
+| **长路径前缀** | ⚠️ 未处理。这是 **Windows 的 260 字符上限**，与分隔符无关；需要 `\\?\` 前缀才能突破。库路径过深时可能失败 |
 | **venv 布局** | POSIX 是 `bin/python`，Windows 是 `Scripts/python.exe`，由 `bootstrap.py` 统一处理 |
 | **控制台编码** | `.bat` 保持纯 ASCII；CLI 在需要时把 stdout 重新包装成 UTF-8（且会先确认对方有 `.buffer`） |
 | **文件锁与 WAL** | Windows 上 `os.replace` 与 WAL 均可用；⚠️ 但**不要把 `data/` 放到网络盘**（NFS/SMB），WAL 依赖同目录共享内存，网络文件系统上会损坏数据 |

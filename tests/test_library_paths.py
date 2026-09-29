@@ -290,3 +290,90 @@ class TestCaseInsensitivePaths:
         from imgsearch.library.paths import path_key
         assert path_key("/a/B", case_insensitive=True) == path_key("/a/b", True)
         assert path_key("/a/B", case_insensitive=False) != path_key("/a/b", False)
+
+
+class TestWindowsPathSemantics:
+    """
+    用 ``ntpath`` 在 Linux 上验证 Windows 的路径语义。
+
+    这个项目的另一个工具（compress）就栽在**手写反斜杠处理**上，
+    所以这里把两件事都钉死：分隔符归一、跨盘符处理。
+    """
+
+    def test_mixed_separators_give_same_key(self):
+        import ntpath
+        from imgsearch.library.paths import path_key
+        a = path_key(r"C:\Images\Sub", case_insensitive=True, path_module=ntpath)
+        b = path_key("C:/Images/Sub", case_insensitive=True, path_module=ntpath)
+        c = path_key(r"C:\Images/Sub" + "/", case_insensitive=True, path_module=ntpath)
+        assert a == b == c == r"c:\images\sub"
+
+    def test_forward_slashes_canonicalized_to_backslashes(self):
+        import ntpath
+        from imgsearch.library.paths import path_key
+        assert "\\" in path_key("C:/a/b", case_insensitive=False, path_module=ntpath)
+
+    def test_dotdot_resolved(self):
+        import ntpath
+        from imgsearch.library.paths import path_key
+        assert path_key("C:/a/../b", case_insensitive=False,
+                        path_module=ntpath) == r"C:\b"
+
+    def test_ancestor_with_mixed_separators(self):
+        import ntpath
+        from imgsearch.library.paths import _is_ancestor_or_same
+        assert _is_ancestor_or_same("C:/Images", r"C:\Images\Sub", True, ntpath)
+        assert _is_ancestor_or_same(r"C:\Images", "C:/Images/Sub/Deep", True, ntpath)
+        assert not _is_ancestor_or_same("C:/Images", "C:/Other", True, ntpath)
+
+    def test_different_drives_are_not_ancestors(self):
+        """C: 与 D: 是不同挂载点，不能当成父子关系（代码里已捕获 ValueError）"""
+        import ntpath
+        from imgsearch.library.paths import _is_ancestor_or_same
+        assert _is_ancestor_or_same("C:/x", "D:/x/sub", False, ntpath) is False
+
+    def test_root_manager_uses_injected_module(self, tmp_path):
+        """整条链路（登记 → 冲突检测）都要走注入的语义"""
+        import ntpath
+        (tmp_path / "Images" / "Sub").mkdir(parents=True)
+        with LibraryDB(tmp_path / "w.db") as db:
+            rm = RootManager(db, case_insensitive=True, path_module=ntpath)
+            key_a = rm._key(r"C:\Images")
+            key_b = rm._key("C:/IMAGES")
+            assert key_a == key_b
+
+    def test_no_handwritten_separator_manipulation(self):
+        """
+        守住根因：文件路径的分隔符处理必须全部交给 os.path，不许手写。
+
+        ⚠️ 只扫描真正处理**文件系统路径**的模块。
+        `imgsearch/engines/` 里有对 **URL** 与 **HTML 文本** 做斜杠操作的地方
+        （如 `api_url.rstrip("/")`、解析链接文本），那是另一回事，不该被误伤。
+        """
+        import re
+        import pathlib as _pathlib
+
+        root = _pathlib.Path(__file__).resolve().parent.parent / "imgsearch"
+        targets = [root / "library", root / "config.py", root / "secrets.py",
+                   root / "processor", root / "service.py"]
+
+        suspicious = re.compile(
+            r'\.split\(\s*["\'][/\\]'          # .split("/")  .split("\\")
+            r'|\.replace\(\s*["\'][/\\]'       # .replace("\\", "/")
+            r'|["\'][/\\]["\']\s*\+'           # "/" + ...
+            r'|\+\s*["\'][/\\]["\']'           # ... + "/"
+            r'|\.strip\(\s*["\'][/\\]'         # .strip("/")
+        )
+
+        hits = []
+        for target in targets:
+            files = target.rglob("*.py") if target.is_dir() else [target]
+            for f in files:
+                for n, line in enumerate(f.read_text(encoding="utf-8").splitlines(), 1):
+                    code = line.split("#", 1)[0]
+                    if suspicious.search(code):
+                        hits.append(f"{f.relative_to(root)}:{n}: {line.strip()[:72]}")
+        assert not hits, (
+            "发现手写的路径分隔符处理 —— 请改用 os.path / pathlib：\n  "
+            + "\n  ".join(hits)
+        )

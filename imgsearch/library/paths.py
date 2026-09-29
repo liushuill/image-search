@@ -51,24 +51,36 @@ def default_case_insensitive() -> bool:
     return os.name == "nt"
 
 
-def path_key(path: str, case_insensitive: bool) -> str:
+def path_key(path: str, case_insensitive: bool, path_module=None) -> str:
     """
     路径比较用的规范形式。
 
-    ⚠️ Windows 上必须归一大小写，否则 ``C:\\Images`` 与 ``c:\\images``
-    会被当成两条不同路径 —— 于是「重复登记」和「嵌套检测」双双失效，
-    同一张图会被记两次（正是这两道检查要防的事）。
+    ⚠️ 两件事都在这里做，缺一不可：
+
+    1. **归一大小写**（Windows 不区分）—— 否则 ``C:\\Images`` 与 ``c:\\images``
+       会被当成两条不同路径，「重复登记」与「嵌套检测」双双失效
+    2. **归一分隔符** —— ``os.path.normpath`` 在 Windows 上会把 ``/`` 转成 ``\\``，
+       因此 ``C:/Images/Sub`` 与 ``C:\\Images\\Sub`` 会得到同一个键
+
+    分隔符**不手写处理**：全部交给 ``os.path``。手写 ``split("/")`` / ``replace("\\","/")``
+    正是跨平台路径 bug 的经典根因。
+
+    Args:
+        path_module: 供测试注入 ``ntpath`` 以在 Linux 上验证 Windows 语义。
+            None 表示用本机的 ``os.path``。
     """
-    text = os.path.normpath(path)
+    mod = path_module or os.path
+    text = mod.normpath(path)
     return text.casefold() if case_insensitive else text
 
 
-def _is_ancestor_or_same(a: str, b: str, case_insensitive: bool = False) -> bool:
+def _is_ancestor_or_same(a: str, b: str, case_insensitive: bool = False,
+                         path_module=None) -> bool:
     """a 是否等于 b，或 b 位于 a 之内"""
-    ka = path_key(a, case_insensitive)
-    kb = path_key(b, case_insensitive)
+    ka = path_key(a, case_insensitive, path_module)
+    kb = path_key(b, case_insensitive, path_module)
     try:
-        return os.path.commonpath([ka, kb]) == ka
+        return (path_module or os.path).commonpath([ka, kb]) == ka
     except ValueError:
         # 不同盘符（Windows 的 C: 与 D:）或无法比较
         return False
@@ -103,16 +115,19 @@ class RootManager:
     """根路径的增删查改"""
 
     def __init__(self, db: LibraryDB,
-                 case_insensitive: Optional[bool] = None):
+                 case_insensitive: Optional[bool] = None,
+                 path_module=None):
         self.db = db
         # None → 按本机文件系统的惯例；显式传值主要供测试使用
         self.case_insensitive = (
             default_case_insensitive() if case_insensitive is None
             else case_insensitive
         )
+        # 同样供测试注入 ntpath，以验证 Windows 的分隔符/盘符语义
+        self.path_module = path_module
 
     def _key(self, path: str) -> str:
-        return path_key(path, self.case_insensitive)
+        return path_key(path, self.case_insensitive, self.path_module)
 
     # ── 查 ──────────────────────────────────────
 
@@ -161,18 +176,19 @@ class RootManager:
             if self._key(root.path) == self._key(target):
                 return root
             # 任一方包含另一方，都会导致同一文件被两条路径覆盖
-            ci = self.case_insensitive
-            if _is_ancestor_or_same(root.path, target, ci):
+            ci, pm = self.case_insensitive, self.path_module
+            if _is_ancestor_or_same(root.path, target, ci, pm):
                 return root
-            if _is_ancestor_or_same(target, root.path, ci):
+            if _is_ancestor_or_same(target, root.path, ci, pm):
                 return root
         return None
 
     def roots_containing(self, file_path: str) -> List[Root]:
         """文件落在哪些根路径下（按路径长度降序，最具体的在前）"""
         target = normalize_path(file_path)
-        ci = self.case_insensitive
-        hits = [r for r in self.list() if _is_ancestor_or_same(r.path, target, ci)]
+        ci, pm = self.case_insensitive, self.path_module
+        hits = [r for r in self.list()
+                if _is_ancestor_or_same(r.path, target, ci, pm)]
         return sorted(hits, key=lambda r: len(r.path), reverse=True)
 
     # ── 增 ──────────────────────────────────────
@@ -191,10 +207,10 @@ class RootManager:
 
         conflict = self.find_conflict(target)
         if conflict is not None:
-            ci = self.case_insensitive
+            ci, pm = self.case_insensitive, self.path_module
             if self._key(conflict.path) == self._key(target):
                 raise LibraryError(f"该路径已经登记过了：\n  {target}")
-            if _is_ancestor_or_same(conflict.path, target, ci):
+            if _is_ancestor_or_same(conflict.path, target, ci, pm):
                 raise LibraryError(
                     f"路径重叠：新路径位于已登记的根路径之内\n"
                     f"  已有：{conflict.path}\n"
