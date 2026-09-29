@@ -194,3 +194,40 @@ class ProbeWorker(QtCore.QThread):
             checks.append((False, f"端点不可达：{type(e).__name__}: {str(e)[:120]}"))
 
         self.done.emit(checks)
+
+
+class ProxyProbe(QtCore.QThread):
+    """测试代理连通性（后台，避免探活的几秒钟冻住界面）"""
+
+    done = QtCore.Signal(bool, str)
+
+    def __init__(self, proxy: str, check_url: str = "", parent=None):
+        super().__init__(parent)
+        self.proxy = proxy
+        self.check_url = check_url
+
+    def run(self) -> None:  # noqa: D102
+        if not self.proxy.strip():
+            self.done.emit(False, "没有填写代理地址。若不需要代理，留空即可。")
+            return
+
+        proxies = {"http": self.proxy.strip(), "https": self.proxy.strip()}
+        url = self.check_url.strip() or "https://www.google.com/generate_204"
+
+        import time
+        import requests
+        try:
+            t0 = time.time()
+            resp = requests.get(url, proxies=proxies, timeout=10,
+                                headers={"User-Agent": "Mozilla/5.0"})
+            cost = (time.time() - t0) * 1000
+            if resp.status_code in (200, 204):
+                self.done.emit(True, f"代理可用：经它访问 {url} 返回 "
+                                     f"HTTP {resp.status_code}（{cost:.0f} ms）")
+            else:
+                self.done.emit(False, f"代理可达但返回 HTTP {resp.status_code}（{cost:.0f} ms）。"
+                                      f"若这不是预期的探活地址，可改「探活地址」。")
+        except Exception as e:                            # noqa: BLE001
+            self.done.emit(False,
+                           f"代理不可用：{type(e).__name__}: {str(e)[:160]}\n"
+                           "程序在代理不可用时会自动降级为直连，不影响使用。")

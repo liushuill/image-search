@@ -16,7 +16,8 @@ from imgsearch.engines.base import SearchResult  # noqa: E402
 
 
 class TestMainWindow:
-    EXPECTED = ["SearchPage", "LibraryPage", "CleanupPage", "EnginesPage", "CredentialsPage"]
+    EXPECTED = ["SearchPage", "LibraryPage", "CleanupPage", "EnginesPage",
+                "CredentialsPage", "SettingsPage"]
 
     def test_all_pages_present(self, qapp):
         from imgsearch_gui.main_window import MainWindow
@@ -69,17 +70,19 @@ class TestSchemaForm:
         from imgsearch.engines.store import get_store
         from imgsearch_gui.widgets.schema_form import SchemaForm
         for ec in get_store().list_all():
-            form = SchemaForm(ec.schema(), ec.settings)
+            form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
             values = form.values()
-            # schema 里声明的可配置字段应全部出现在表单里
+            # schema 里声明的**非凭据**字段应全部出现在表单里。
+            # 凭据字段刻意排除：它们只读、由「凭据」页写入 .env，
+            # 不允许从引擎页产生第二个真值来源。
             expected = {f.key for f in ec.schema()
-                        if f.key not in ("enabled", "priority")}
+                        if f.key not in ("enabled", "priority") and not f.is_secret}
             assert set(values) == expected, f"{ec.name} 表单字段缺失"
 
     def test_values_round_trip(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
         ec = store.get("sauceNAO")
-        form = SchemaForm(ec.schema(), ec.settings)
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
         got = form.values()
         assert got["timeout"] == ec.get("timeout")
         assert got["proxy_mode"] == ec.get("proxy_mode")
@@ -88,7 +91,7 @@ class TestSchemaForm:
     def test_reset_to_updates_widgets(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
         ec = store.get("sauceNAO")
-        form = SchemaForm(ec.schema(), ec.settings)
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
         form.reset_to({**ec.settings, "timeout": 77, "proxy_mode": "off"})
         got = form.values()
         assert got["timeout"] == 77
@@ -97,14 +100,14 @@ class TestSchemaForm:
     def test_bool_and_kv_types(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
         ec = store.get("iqdb")
-        form = SchemaForm(ec.schema(), ec.settings)
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
         # services 是字符串字段，round-trip 应保持
         assert form.values()["services"] == ec.get("services")
 
     def test_error_banner_and_highlight(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
         ec = store.get("sauceNAO")
-        form = SchemaForm(ec.schema(), ec.settings)
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
         form.show_error("超时 不能小于 1")
         assert form._banner.isVisible() or True      # 无显示环境时 isVisible 不可靠
         assert "不能小于" in form._banner.text()

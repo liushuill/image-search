@@ -1,12 +1,15 @@
 """
 凭据页
 
-**你不需要打开或编辑 .env**：在这里填，程序负责写进 ``.env`` 并设成 600。
+**凭据只在这里填写**：填完保存，程序负责写进 ``.env`` 并设成 600。
+你不需要打开或手动编辑那个文件。
 
-每一栏都会明确告诉你三件事：
-  1. 现在到底有没有配上（值一律脱敏显示）
-  2. 这个值是从哪来的（真实环境变量 / .env / 配置文件）
-  3. 留空时会不会自动回退到别处
+为什么引擎页不再提供凭据输入框：过去那里也能改 api_key，值会写进
+``config.json`` —— 而那个文件是**入库**的，等于把密钥写回版本历史；
+更麻烦的是引擎级的值优先于 ``.env``，于是「凭据页显示的值」和
+「实际生效的值」可能不是同一个。现在凭据只有 ``.env`` 一个落点。
+
+清单来自「引擎 schema ∪ 已知清单」，因此自定义引擎声明的凭据会自动出现。
 """
 
 import os
@@ -16,9 +19,10 @@ from pathlib import Path
 from PySide6 import QtCore, QtGui, QtWidgets
 
 from imgsearch import secrets
+from imgsearch.service import declared_secrets
 from imgsearch_gui import style
 
-# 每个凭据的展示名与用途说明（名称要和 secrets.KNOWN_SECRETS 对齐）
+# 已知凭据的友好文案与获取入口（其余由引擎 schema 的 help 兜底）
 DISPLAY = {
     "SAUCENAO_KEY": (
         "SauceNAO API Key",
@@ -43,11 +47,17 @@ class CredentialRow(QtWidgets.QFrame):
 
     changed = QtCore.Signal()
 
-    def __init__(self, name: str, parent=None):
+    def __init__(self, name: str, fallback_title: str = "",
+                 fallback_desc: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
         self.name = name
-        title, desc, link = DISPLAY.get(name, (name, "", ""))
+
+        # 已知凭据用友好文案；否则用引擎 schema 给的名字与 help
+        title, desc, link = DISPLAY.get(
+            name, (fallback_title or name, fallback_desc, "")
+        )
+        self.title = title
 
         lay = QtWidgets.QVBoxLayout(self)
         lay.setContentsMargins(14, 12, 14, 12)
@@ -57,6 +67,10 @@ class CredentialRow(QtWidgets.QFrame):
         lbl = QtWidgets.QLabel(title)
         lbl.setObjectName("SectionTitle")
         head.addWidget(lbl)
+
+        env_lbl = QtWidgets.QLabel(f"（.env 变量名：{name}）")
+        env_lbl.setObjectName("FieldHelp")
+        head.addWidget(env_lbl)
 
         self.status = QtWidgets.QLabel()
         self.status.setObjectName("FieldHelp")
@@ -105,13 +119,12 @@ class CredentialRow(QtWidgets.QFrame):
             row.addWidget(open_btn)
 
         lay.addLayout(row)
-
         self.refresh_status()
 
     # ── 状态 ────────────────────────────────────
 
     def current_source(self) -> str:
-        """这个凭据的值来自哪里"""
+        """这个凭据的值来自哪里（真实环境变量优先于 .env）"""
         if os.environ.get(self.name):
             return "环境变量"
         if secrets.load().get(self.name):
@@ -120,8 +133,7 @@ class CredentialRow(QtWidgets.QFrame):
 
     def refresh_status(self) -> None:
         source = self.current_source()
-        value = secrets.get(self.name)
-        if value:
+        if secrets.is_set(self.name):
             self.status.setText(f"　✅ 已设置（{source}）：{secrets.masked(self.name)}")
             self.status.setStyleSheet(f"color:{style.OK};")
         else:
@@ -139,7 +151,7 @@ class CredentialRow(QtWidgets.QFrame):
 
 
 class CredentialsPage(QtWidgets.QWidget):
-    """凭据管理"""
+    """凭据管理（写入 .env）"""
 
     saved = QtCore.Signal()
 
@@ -154,8 +166,10 @@ class CredentialsPage(QtWidgets.QWidget):
         outer.addWidget(title)
 
         hint = QtWidgets.QLabel(
-            "在这里填写即可 —— 保存后程序会写进 .env 并设为仅自己可读（600）。"
-            "你不需要打开或手动编辑那个文件。"
+            "凭据只在这里填写 —— 保存后程序会写进 .env 并设为仅自己可读（600），"
+            "你不需要打开或手动编辑那个文件。\n"
+            "引擎页的凭据字段是只读的：那里只显示「有没有、值是什么（脱敏）」，"
+            "避免同一个密钥出现两个来源、彼此不一致。"
         )
         hint.setObjectName("PageHint")
         hint.setWordWrap(True)
@@ -180,13 +194,12 @@ class CredentialsPage(QtWidgets.QWidget):
         il.addWidget(refresh_btn)
         outer.addWidget(info)
 
-        # ── 各凭据 ──
-        self.rows = {}
-        for name in secrets.KNOWN_SECRETS:
-            row = CredentialRow(name)
-            row.changed.connect(self._update_save_state)
-            self.rows[name] = row
-            outer.addWidget(row)
+        # ── 凭据行容器（单独一个盒子，便于整块重建）──
+        self.rows_box = QtWidgets.QWidget()
+        self.rows_layout = QtWidgets.QVBoxLayout(self.rows_box)
+        self.rows_layout.setContentsMargins(0, 0, 0, 0)
+        self.rows_layout.setSpacing(10)
+        outer.addWidget(self.rows_box)
 
         outer.addStretch(1)
 
@@ -194,6 +207,7 @@ class CredentialsPage(QtWidgets.QWidget):
         bar = QtWidgets.QHBoxLayout()
         self.message = QtWidgets.QLabel()
         self.message.setObjectName("FieldHelp")
+        self.message.setWordWrap(True)
         bar.addWidget(self.message, 1)
 
         self.save_btn = QtWidgets.QPushButton("保存凭据")
@@ -203,6 +217,37 @@ class CredentialsPage(QtWidgets.QWidget):
         bar.addWidget(self.save_btn)
         outer.addLayout(bar)
 
+        self.rows = {}
+        self.rebuild()
+
+    # ── 构建 ────────────────────────────────────
+
+    def rebuild(self) -> None:
+        """
+        按当前凭据清单重建所有行。
+
+        引擎页新增带凭据的自定义引擎后，这里要能看到它 ——
+        所以清单每次都重新算。
+        """
+        secrets.invalidate_cache()
+        specs = declared_secrets()
+        wanted = [env for env, _, _ in specs]
+        if wanted == list(self.rows.keys()):
+            self.reload()
+            return
+
+        while self.rows_layout.count():
+            item = self.rows_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.setParent(None)
+                w.deleteLater()
+        self.rows = {}
+        for env_name, title, desc in specs:
+            row = CredentialRow(env_name, fallback_title=title, fallback_desc=desc)
+            row.changed.connect(self._update_save_state)
+            self.rows[env_name] = row
+            self.rows_layout.addWidget(row)
         self.reload()
 
     # ── 读取 / 保存 ─────────────────────────────
@@ -230,9 +275,9 @@ class CredentialsPage(QtWidgets.QWidget):
         pending = [r for r in self.rows.values() if r.pending_value()]
         self.save_btn.setEnabled(bool(pending))
         if pending:
+            self.message.setStyleSheet(f"color:{style.MUTED};")
             self.message.setText(
-                f"待保存 {len(pending)} 项："
-                + "、".join(DISPLAY.get(r.name, (r.name,))[0] for r in pending)
+                f"待保存 {len(pending)} 项：" + "、".join(r.title for r in pending)
             )
         else:
             self.message.setText("")
@@ -246,8 +291,8 @@ class CredentialsPage(QtWidgets.QWidget):
             try:
                 secrets.set(row.name, value)
             except Exception as e:                        # noqa: BLE001
-                self.message.setText(f"❌ 保存 {row.name} 失败：{e}")
                 self.message.setStyleSheet(f"color:{style.ERR};")
+                self.message.setText(f"❌ 保存 {row.title} 失败：{e}")
                 return
             changed.append(row.name)
 
@@ -259,8 +304,9 @@ class CredentialsPage(QtWidgets.QWidget):
         self._update_save_state()
 
         self.message.setStyleSheet(f"color:{style.OK};")
+        titles = [self.rows[n].title for n in changed if n in self.rows]
         self.message.setText(
-            "✅ 已保存：" + "、".join(DISPLAY.get(n, (n,))[0] for n in changed)
+            "✅ 已保存：" + "、".join(titles)
             + f"　（写入 {secrets.ENV_FILE}，权限 600）"
         )
         self.saved.emit()
@@ -269,3 +315,7 @@ class CredentialsPage(QtWidgets.QWidget):
         path = Path(secrets.ENV_FILE)
         target = path.parent if path.parent.is_dir() else Path.home()
         QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(target)))
+
+    def showEvent(self, event) -> None:          # noqa: D102
+        super().showEvent(event)
+        self.rebuild()

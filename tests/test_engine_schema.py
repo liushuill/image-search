@@ -115,9 +115,40 @@ class TestSchema:
 
     def test_common_schema_has_expected_keys(self):
         keys = COMMON_SCHEMA.keys()
-        for k in ("api_url", "api_key", "min_similarity", "proxy_mode",
+        for k in ("api_url", "min_similarity", "proxy_mode",
                   "request_delay", "timeout", "headers", "params"):
             assert k in keys, k
+
+    def test_api_key_is_declared_per_engine_not_globally(self):
+        """
+        回归：api_key 刻意**不放在通用 schema 里**。
+
+        曾经它挂在 COMMON_SCHEMA 上且没声明 env_var —— 于是
+        env_var_for() 派生出一个 IMGSEARCH_<引擎>_<字段> 的名字，
+        而引擎代码读的是 SAUCENAO_KEY 这种固定名，
+        凭据「搬过去了却读不到」，表现为「配了 key 却仍说未配置」。
+        """
+        from imgsearch.engines.registry import find_builtin, schema_for_class
+
+        assert "api_key" not in COMMON_SCHEMA
+
+        # 需要凭据的引擎：必须声明 api_key，且 env_var 与引擎代码读的一致
+        for name, expected_env in (("sauceNAO", "SAUCENAO_KEY"),
+                                   ("danbooru", "DANBOORU_API_KEY")):
+            f = schema_for_class(find_builtin(name)).get("api_key")
+            assert f is not None and f.is_secret, name
+            assert f.env_var == expected_env, f"{name} 的 env_var 不对"
+
+        # 不需要凭据的引擎：不该挂着无用的 api_key 字段
+        for name in ("iqdb", "traceMoe", "ascii2d"):
+            assert schema_for_class(find_builtin(name)).get("api_key") is None, name
+
+    def test_env_var_for_falls_back_to_derived_name(self):
+        """没声明 env_var 的自定义引擎字段也要有一个稳定落点"""
+        from imgsearch.engines.schema import env_var_for
+        f = Field("api_key", "Key", SECRET, "")
+        assert env_var_for("my engine", f) == "IMGSEARCH_MY_ENGINE_API_KEY"
+        assert env_var_for("x", Field("api_key", "K", SECRET, "", env_var="FOO")) == "FOO"
 
     def test_proxy_mode_is_enum(self):
         assert COMMON_SCHEMA.get("proxy_mode").choices == ("auto", "on", "off")

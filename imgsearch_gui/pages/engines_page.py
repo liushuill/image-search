@@ -22,6 +22,7 @@ class EnginesPage(QtWidgets.QWidget):
     """搜索引擎配置"""
 
     changed = QtCore.Signal()
+    secret_requested = QtCore.Signal(str)     # 请求跳到「凭据」页填写某个凭据
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -29,6 +30,10 @@ class EnginesPage(QtWidgets.QWidget):
         self._current: str = ""
         self._form: SchemaForm | None = None
         self._probe: ProbeWorker | None = None
+        # 有未保存修改时为 True；切换引擎或切换页面都会先问一句
+        self._dirty = False
+        # 程序性改动列表/选中时置位，避免把「我们自己造成的选中变化」当成用户操作
+        self._loading = False
 
         outer = QtWidgets.QVBoxLayout(self)
         outer.setContentsMargins(0, 0, 0, 0)
@@ -123,14 +128,15 @@ class EnginesPage(QtWidgets.QWidget):
         self.test_btn.clicked.connect(self._test)
         bar.addWidget(self.test_btn)
 
-        self.revert_btn = QtWidgets.QPushButton("放弃修改")
-        self.revert_btn.clicked.connect(lambda: self._load_detail(self._current))
-        bar.addWidget(self.revert_btn)
         bar.addStretch(1)
+
+        self.dirty_label = QtWidgets.QLabel()
+        self.dirty_label.setObjectName("FieldHelp")
+        bar.addWidget(self.dirty_label)
 
         self.save_btn = QtWidgets.QPushButton("保存")
         self.save_btn.setObjectName("Primary")
-        self.save_btn.clicked.connect(self._save)
+        self.save_btn.clicked.connect(lambda: self._save())
         bar.addWidget(self.save_btn)
         rl.addLayout(bar)
 
@@ -145,6 +151,7 @@ class EnginesPage(QtWidgets.QWidget):
     def refresh(self, keep: str = "") -> None:
         self.store = get_store(refresh=True)
         target = keep or self._current
+        self._loading = True
         self.list.clear()
         for ec in self.store.list_all():
             item = QtWidgets.QListWidgetItem(self._label_for(ec))
@@ -154,12 +161,23 @@ class EnginesPage(QtWidgets.QWidget):
             self.list.addItem(item)
 
         # 选中原来那个（或第一个）
-        for i in range(self.list.count()):
-            if self.list.item(i).data(QtCore.Qt.UserRole) == target:
-                self.list.setCurrentRow(i)
-                return
-        if self.list.count():
-            self.list.setCurrentRow(0)
+        try:
+            for i in range(self.list.count()):
+                if self.list.item(i).data(QtCore.Qt.UserRole) == target:
+                    self.list.setCurrentRow(i)
+                    break
+            else:
+                if self.list.count():
+                    self.list.setCurrentRow(0)
+        finally:
+            self._loading = False
+
+        # ⚠️ 上面用 _loading 挡住了「选中变化」事件，否则会被当成用户切换而弹窗。
+        # 代价是初次加载也不会触发 _on_select，所以这里**必须显式加载一次**，
+        # 否则引擎页打开时右侧是空的。
+        item = self.list.currentItem()
+        if item is not None:
+            self._load_detail(item.data(QtCore.Qt.UserRole))
         else:
             self._clear_detail()
 
@@ -193,9 +211,75 @@ class EnginesPage(QtWidgets.QWidget):
         return f"⚠️ 缺少 {', '.join(missing)}" if missing else ""
 
     def _on_select(self, current, _previous) -> None:
-        if current is None:
+        if current is None or self._loading:
             return
-        self._load_detail(current.data(QtCore.Qt.UserRole))
+        name = current.data(QtCore.Qt.UserRole)
+        if name == self._current:
+            return
+
+        if self._dirty and not self._confirm_leave():
+            # 用户选了「取消」 → 把选中项退回原来那个（用 _loading 防止递归）
+            self._loading = True
+            try:
+                for i in range(self.list.count()):
+                    if self.list.item(i).data(QtCore.Qt.UserRole) == self._current:
+                        self.list.setCurrentRow(i)
+                        break
+            finally:
+                self._loading = False
+            return
+
+        self._load_detail(name)
+
+    # ── 未保存修改的守卫 ────────────────────────
+
+    def can_leave(self) -> bool:
+        """
+        页面切换前的钩子（由 MainWindow 调用）。
+
+        Returns:
+            True 表示可以离开
+        """
+        return self._confirm_leave()
+
+    def _mark_dirty(self, *_args) -> None:
+        self._dirty = True
+        self.dirty_label.setText("● 有未保存的修改")
+        self.dirty_label.setStyleSheet(f"color:{style.WARN};")
+
+    def _clear_dirty(self) -> None:
+        self._dirty = False
+        self.dirty_label.setText("")
+
+    def _confirm_leave(self) -> bool:
+        """
+        有未保存修改时问一句：保存 / 丢弃修改 / 取消（返回修改）。
+
+        「取消」= 不离开，让用户接着改 —— 这是三者里唯一不会丢数据的出口，
+        所以它必须存在（只给「保存/丢弃」会逼用户在没想好时二选一）。
+        """
+        if not self._dirty:
+            return True
+
+        box = QtWidgets.QMessageBox(self)
+        box.setIcon(QtWidgets.QMessageBox.Question)
+        box.setWindowTitle("有未保存的修改")
+        box.setText(f"「{self._current}」的配置已改动，但还没保存。")
+        box.setInformativeText("离开前要先保存吗？")
+        btn_save = box.addButton("保存", QtWidgets.QMessageBox.AcceptRole)
+        btn_discard = box.addButton("丢弃修改", QtWidgets.QMessageBox.DestructiveRole)
+        box.addButton("取消", QtWidgets.QMessageBox.RejectRole)
+        box.setDefaultButton(btn_save)
+        box.exec()
+
+        clicked = box.clickedButton()
+        if clicked is btn_save:
+            # 保存失败（校验不过）时留在原地继续改
+            return self._save(quiet=True)
+        if clicked is btn_discard:
+            self._clear_dirty()
+            return True
+        return False
 
     def _clear_detail(self) -> None:
         self._current = ""
@@ -240,14 +324,23 @@ class EnginesPage(QtWidgets.QWidget):
             bits.append("⚠️ 引擎类当前无法解析，下列为已保存的值")
         self.detail_meta.setText("　·　".join(bits))
 
-        form = SchemaForm(ec.schema(), ec.settings)
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
+        form.changed.connect(self._mark_dirty)
+        form.secret_requested.connect(self.secret_requested)
         self._set_form(form)
+        self._clear_dirty()
         self.save_btn.setEnabled(True)
         self.test_btn.setEnabled(True)
 
-    def _save(self) -> None:
+    def _save(self, quiet: bool = False) -> bool:
+        """
+        保存当前表单。
+
+        Returns:
+            True 表示保存成功。失败时错误已显示在表单顶部，调用方应留在原地。
+        """
         if self._form is None or not self._current:
-            return
+            return False
         self._form.clear_error()
         values = self._form.values()
         try:
@@ -255,13 +348,16 @@ class EnginesPage(QtWidgets.QWidget):
         except ConfigError as e:
             # store 已做类型转换与校验，这里只负责把话讲清楚
             self._form.show_error(str(e))
-            return
+            return False
         except Exception as e:                            # noqa: BLE001
             self._form.show_error(f"保存失败：{e}")
-            return
+            return False
+        self._clear_dirty()
         self.changed.emit()
-        self.refresh(keep=self._current)
-        QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), "已保存")
+        if not quiet:
+            self.refresh(keep=self._current)
+            QtWidgets.QToolTip.showText(QtGui.QCursor.pos(), "已保存")
+        return True
 
     # ── 操作 ────────────────────────────────────
 

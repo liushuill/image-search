@@ -27,12 +27,15 @@ from imgsearch.engines.registry import (
     resolve_engine_class,
     schema_for,
 )
-from imgsearch.engines.schema import ConfigError, Schema, check_cross_fields
+from imgsearch.engines.schema import (
+    ConfigError, Schema, check_cross_fields, env_var_for,
+    legacy_env_var_for,
+)
 
 _CONFIG_KEY = "search_engines"
 # 引擎配置的结构版本，用于「字段默认值变更后需要重刷」这类迁移
 _VERSION_KEY = "search_engines_version"
-_SCHEMA_VERSION = 3
+_SCHEMA_VERSION = 5
 
 # 结构性字段：不进 settings
 _STRUCTURAL_KEYS = ("name", "enabled", "priority", "module_path", "class_name", "settings")
@@ -251,6 +254,10 @@ class EngineStore:
 
         v0 → v2：首次引入 min_similarity 与 proxy_mode。
         v2 → v3：用真实图库实测重新校准了 min_similarity（iqdb 45 → 65）。
+        v3 → v4：凭据不再落 config.json；把已被写进去的搬迁到 .env。
+        v4 → v5：修正 v4 的 env 变量名 —— 当时 api_key 字段没声明 env_var，
+                 凭据被搬到了派生名 IMGSEARCH_* 上，而引擎代码读的是
+                 SAUCENAO_KEY / DANBOORU_API_KEY，等于「搬过去却读不到」。
         """
         if stored_version >= _SCHEMA_VERSION:
             return False
@@ -266,7 +273,92 @@ class EngineStore:
                 # 阈值被重新校准过，让 schema 里的新默认值生效
                 e.settings.pop("min_similarity", None)
 
+        if stored_version < 4:
+            self._scrub_secrets_to_env()
+
+        if stored_version < 5:
+            self._reconcile_secret_env_names()
+
         return True
+
+    def _reconcile_secret_env_names(self) -> None:
+        """
+        把凭据从早期派生名挪到字段声明的正确名字上。
+
+        v4 那版迁移用了 ``IMGSEARCH_<引擎>_<字段>``，但引擎代码读的是
+        ``SAUCENAO_KEY`` 等固定名字 —— 结果凭据"搬过去了却没生效"。
+        这里做一次纠偏：派生名有值、正确名没有 → 挪过去；派生名随即清掉。
+        """
+        moved = []
+        for ec in self._engines:
+            for f in ec.schema():
+                if not f.is_secret:
+                    continue
+                correct = env_var_for(ec.name, f)
+                legacy = legacy_env_var_for(ec.name, f)
+                if legacy == correct:
+                    continue
+                legacy_value = secrets.get(legacy)
+                if not legacy_value:
+                    continue
+
+                # ⚠️ 冲突时以**派生名**上的值为准：
+                # 它来自 v4 迁移，源头是当时**实际生效**的引擎级设置；
+                # 正确名上那个是更早的旧值，正是它被引擎级设置盖住了，
+                # 才导致「凭据页显示的值与实际生效的值不是同一个」。
+                previous = secrets.get(correct)
+                secrets.set(correct, legacy_value)
+                secrets.unset(legacy)
+                moved.append((ec.name, f.label, legacy, correct, previous))
+
+        if moved:
+            print("\n🔧 已修正凭据的环境变量名（早期版本搬错了地方）：")
+            for engine, label, legacy, correct, previous in moved:
+                print(f"   · {engine} / {label}：{legacy} → {correct}"
+                      f"（现在：{secrets.masked(correct)}）")
+                if previous and previous != secrets.get(correct):
+                    print(f"     ⚠️ {correct} 原本是另一个值"
+                          f"（{previous[:4]}****{previous[-4:]}），已被覆盖。"
+                          f"如果那个才对，请在「凭据」页重新填写。")
+
+    def _scrub_secrets_to_env(self) -> None:
+        """
+        把误存进 config.json 的凭据搬到 .env（一次性）。
+
+        背景：引擎配置页曾经允许直接编辑 SECRET 字段，值会写进 config.json，
+        而该文件是**入库**的 —— 等于把密钥写回版本历史，
+        正是 P1 阶段刚清理掉的问题。更麻烦的是引擎级的值优先于 .env，
+        于是「凭据页显示的值」和「实际生效的值」可能不是同一个。
+
+        冲突处理：以**引擎级的值**为准（它才是实际生效的那个），
+        但把覆盖行为明确报出来，让用户有机会核对。
+        """
+        moved = []
+        for ec in self._engines:
+            for f in ec.schema():
+                if not f.is_secret:
+                    continue
+                raw = ec.settings.get(f.key)
+                if not raw or not isinstance(raw, str):
+                    continue
+                value = raw.strip()
+                env_name = env_var_for(ec.name, f)
+                previous = secrets.get(env_name)
+                secrets.set(env_name, value)
+                ec.settings[f.key] = ""
+                moved.append((ec.name, f.label, env_name, previous, value))
+
+        if not moved:
+            return
+
+        print("\n⚠️ 检测到凭据被存在了 config.json 里（该文件是入库的），已搬迁到 .env：")
+        for engine, label, env_name, previous, _new in moved:
+            print(f"   · {engine} / {label} → .env 的 {env_name}"
+                  f"（现在：{secrets.masked(env_name)}）")
+            if previous and previous != _new:
+                print(f"     ⚠️ .env 里原本是另一个值（{previous[:4]}****{previous[-4:]}），已被覆盖。")
+                print("        如果那个才是对的，请到「凭据」页重新填写。")
+        print("   config.json 里的凭据字段已清空 —— 该文件入库，密钥不该出现在里面。")
 
     def _prune_stale_settings(self, ec: EngineConfig) -> bool:
         """
@@ -380,6 +472,10 @@ class EngineStore:
     def save(self) -> None:
         """写回 config.json（原子写）"""
         self._renumber(self._engines)
+        # 兜底：凭据字段落盘前一律清空。哪怕调用方绕过 update() 直接塞了值，
+        # 也不会把密钥写进入库的 config.json。
+        for ec in self._engines:
+            self._blank_secret_settings(ec)
         payload = [e.to_dict() for e in self._engines]
         # 一次写入，避免版本号与内容不一致的中间状态
         save_configs(**{_CONFIG_KEY: payload, _VERSION_KEY: _SCHEMA_VERSION})
@@ -404,6 +500,13 @@ class EngineStore:
                 ec.settings[f.key] = f.default
                 changed = True
         return changed
+
+    @staticmethod
+    def _blank_secret_settings(ec: EngineConfig) -> None:
+        """把 SECRET 字段的值清空（凭据只存在于 .env）"""
+        for f in ec.schema():
+            if f.is_secret and ec.settings.get(f.key):
+                ec.settings[f.key] = ""
 
     @staticmethod
     def _renumber(engines: List[EngineConfig]) -> None:
@@ -578,6 +681,17 @@ class EngineStore:
                 # 未知键原样写入（自定义引擎的扩展字段）
                 pending[key] = raw
                 continue
+
+            if f.is_secret:
+                # ⚠️ 凭据只写 .env，**绝不落 config.json** —— config.json 是入库文件，
+                # 把密钥写进去就等于写回版本历史。配置里永远只留一个空占位，
+                # 读取时由 to_engine_kwargs() 从 .env 回退。
+                text = str(raw or "").strip()
+                if text:
+                    secrets.set(env_var_for(ec.name, f), text)
+                pending[key] = ""
+                continue
+
             from imgsearch.engines.schema import coerce, validate
             converted = coerce(f, raw)
             validate(f, converted)

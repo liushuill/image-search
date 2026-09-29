@@ -12,6 +12,7 @@ GUI 通过 stdout 桥接转成信号（见 ``imgsearch_gui.workers``）。
 from dataclasses import dataclass, field
 from typing import Callable, List, Optional
 
+from imgsearch import secrets
 from imgsearch.config import get
 from imgsearch.engines.base import SearchResult
 from imgsearch.library import LibraryDB, LibraryError, LibraryStore
@@ -30,6 +31,49 @@ class SearchOutcome:
     @property
     def found(self) -> bool:
         return bool(self.results)
+
+
+def declared_secrets() -> List[tuple]:
+    """
+    所有需要填写的凭据：``[(环境变量名, 展示名, 说明), ...]``
+
+    来源 = ``secrets.KNOWN_SECRETS`` ∪ 各引擎 schema 里声明的 SECRET 字段。
+    这样**自定义引擎新增的凭据也会自动出现在「凭据」页**，
+    不必回来改界面或这份列表。
+
+    这里是凭据的唯一定义处：引擎页只读、凭据页负责写入 .env。
+    """
+    from imgsearch.engines.schema import env_var_for
+    from imgsearch.engines.store import get_store
+
+    known = dict(secrets.KNOWN_SECRETS)
+    out: List[tuple] = []
+    seen = set()
+
+    for env_name, desc in known.items():
+        out.append((env_name, env_name, desc))
+        seen.add(env_name)
+
+    try:
+        store = get_store()
+    except Exception:                                     # noqa: BLE001
+        return out
+
+    for ec in store.list_all():
+        try:
+            schema = ec.schema()
+        except Exception:                                 # noqa: BLE001
+            continue
+        for f in schema:
+            if not f.is_secret:
+                continue
+            env_name = env_var_for(ec.name, f)
+            if env_name in seen:
+                continue
+            seen.add(env_name)
+            out.append((env_name, f"{ec.display_name} · {f.label}",
+                        f.help or f"由引擎「{ec.display_name}」使用"))
+    return out
 
 
 def open_library(enabled: Optional[bool] = None):

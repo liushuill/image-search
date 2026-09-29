@@ -35,6 +35,18 @@ from imgsearch.processor.image_utils import get_file_hash, get_image_info, hammi
 # 在超大库上不至于卡死，超出时只做精确匹配。
 MAX_SIMILAR_SCAN = 20000
 
+
+def _bind(value):
+    """把任意值变成 SQLite 能绑定的标量（容器转成 JSON 字符串）"""
+    if value is None or isinstance(value, (str, int, float, bytes)):
+        return value
+    if isinstance(value, bool):
+        return int(value)
+    try:
+        return json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        return str(value)
+
 # 默认的 dHash 汉明距离阈值：64 位哈希下 0–6 属于「很可能是同一张」
 DEFAULT_MAX_DISTANCE = 6
 
@@ -282,18 +294,23 @@ class LibraryStore:
             if replace:
                 self.db.conn.execute("DELETE FROM results WHERE image_id = ?", (image_id,))
             for r in results:
+                # SearchResult.__post_init__ 已做归一化；这里再兜一层，
+                # 保证任何值都能安全绑定（宁可存成字符串，也不要整条失败）
                 self.db.conn.execute(
                     "INSERT INTO results(image_id, engine, similarity, pixiv_id, pixiv_page,"
                     " artist, artist_id, title, material, ext_urls, highres_url, thumbnail,"
                     " danbooru_id, gelbooru_id, twitter_id, extra_ids, detail, fetched_at)"
                     " VALUES(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
-                    (image_id, r.source, float(r.similarity or 0), r.pixiv_id,
-                     int(r.pixiv_page or 0), r.artist, r.artist_id, r.title, r.material,
+                    (image_id, _bind(r.source), float(r.similarity or 0),
+                     _bind(r.pixiv_id), int(r.pixiv_page or 0),
+                     _bind(r.artist), _bind(r.artist_id), _bind(r.title),
+                     _bind(r.material),
                      json.dumps(list(r.ext_urls or []), ensure_ascii=False),
-                     r.highres_url, r.thumbnail, r.danbooru_id, r.gelbooru_id,
-                     r.twitter_id,
+                     _bind(r.highres_url), _bind(r.thumbnail),
+                     _bind(r.danbooru_id), _bind(r.gelbooru_id),
+                     _bind(r.twitter_id),
                      json.dumps(dict(r.extra_ids or {}), ensure_ascii=False),
-                     r.detail, now),
+                     _bind(r.detail), now),
                 )
         return len(results)
 

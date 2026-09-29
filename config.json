@@ -10,7 +10,6 @@
       "class_name": "",
       "settings": {
         "api_url": "https://ascii2d.net",
-        "api_key": "",
         "headers": {},
         "params": {},
         "request_delay": 3.0,
@@ -31,8 +30,8 @@
         "api_key": "",
         "headers": {},
         "params": {
-          "db": 999,
-          "output_type": 2
+          "db": "999",
+          "output_type": "2"
         },
         "request_delay": 8.0,
         "timeout": 30,
@@ -43,7 +42,7 @@
         "db": 999,
         "numres": 5,
         "proxy_mode": "auto",
-        "min_similarity": 60
+        "min_similarity": 70
       }
     },
     {
@@ -72,7 +71,6 @@
       "class_name": "",
       "settings": {
         "api_url": "",
-        "api_key": "",
         "request_delay": 8.0,
         "timeout": 30,
         "headers": {},
@@ -90,7 +88,6 @@
       "class_name": "",
       "settings": {
         "api_url": "",
-        "api_key": "",
         "request_delay": 8.0,
         "timeout": 30,
         "headers": {},
@@ -106,6 +103,8 @@
       }
     }
   ],
+  "use_library": true,
+  "cache_thumbnails": true,
   "pixiv_sources": [
     {
       "name": "Official",
@@ -126,5 +125,5 @@
       "priority": 3
     }
   ],
-  "search_engines_version": 3
+  "search_engines_version": 5
 }

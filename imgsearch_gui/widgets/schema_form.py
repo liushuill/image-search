@@ -19,19 +19,32 @@ from PySide6 import QtCore, QtWidgets
 
 from imgsearch import secrets
 from imgsearch.engines.schema import (
-    BOOL, FLOAT, INT, KV, SECRET, TEXT,
+    BOOL, FLOAT, INT, KV, SECRET, TEXT, env_var_for,
 )
 from imgsearch_gui import style
 
 
 class SchemaForm(QtWidgets.QWidget):
-    """按 schema 生成引擎配置表单"""
+    """
+    按 schema 生成引擎配置表单。
+
+    ⚠️ **凭据字段在这里是只读的**：只显示「当前从哪读到、值是什么（脱敏）」，
+    并给一个跳转到「凭据」页的按钮。
+
+    原因：引擎页曾允许直接编辑 api_key，值会写进 config.json ——
+    而那个文件是**入库**的，等于把密钥写回版本历史；更糟的是引擎级的值
+    优先于 .env，于是「凭据页显示的值」和「实际生效的值」可能不是同一个。
+    凭据只应有 .env 一个落点。
+    """
 
     changed = QtCore.Signal()
+    secret_requested = QtCore.Signal(str)      # 环境变量名 → 请求跳去凭据页
 
-    def __init__(self, schema, settings: Dict[str, Any], parent=None):
+    def __init__(self, schema, settings: Dict[str, Any], engine_name: str = "",
+                 parent=None):
         super().__init__(parent)
         self.schema = schema
+        self.engine_name = engine_name
         self._widgets: Dict[str, QtWidgets.QWidget] = {}
         self._rows: Dict[str, QtWidgets.QWidget] = {}      # 键 → 该字段的整行容器
         self._labels: Dict[str, str] = {}
@@ -164,29 +177,27 @@ class SchemaForm(QtWidgets.QWidget):
             return w
 
         if f.type == SECRET:
+            # 只读：凭据只在「凭据」页维护，落点是 .env
             holder = QtWidgets.QWidget()
             h = QtWidgets.QHBoxLayout(holder)
             h.setContentsMargins(0, 0, 0, 0)
-            h.setSpacing(6)
-            w = QtWidgets.QLineEdit(str(value or ""))
-            w.setEchoMode(QtWidgets.QLineEdit.Password)
-            w.setPlaceholderText("留空则使用 .env 中对应的变量")
-            w.textChanged.connect(self.changed)
-            h.addWidget(w, 1)
+            h.setSpacing(8)
 
-            toggle = QtWidgets.QToolButton()
-            toggle.setText("显示")
-            toggle.setCheckable(True)
-            toggle.setCursor(QtCore.Qt.PointingHandCursor)
+            env_name = env_var_for(self.engine_name, f)
+            status = QtWidgets.QLabel()
+            status.setObjectName("FieldHelp")
+            if secrets.is_set(env_name):
+                source = (".env" if secrets.load().get(env_name) else "环境变量")
+                status.setText(f"✅ 已配置（{source}）：{secrets.masked(env_name)}")
+                status.setStyleSheet(f"color:{style.OK};")
+            else:
+                status.setText(f"✗ 未配置（.env 的 {env_name} 为空）")
+                status.setStyleSheet(f"color:{style.MUTED};")
+            h.addWidget(status, 1)
 
-            def _toggle(checked: bool) -> None:
-                w.setEchoMode(QtWidgets.QLineEdit.Normal if checked
-                              else QtWidgets.QLineEdit.Password)
-                toggle.setText("隐藏" if checked else "显示")
-
-            toggle.toggled.connect(_toggle)
-            h.addWidget(toggle)
-            holder.value_widget = w          # type: ignore[attr-defined]
+            go = QtWidgets.QPushButton("去「凭据」页填写")
+            go.clicked.connect(lambda: self.secret_requested.emit(env_name))
+            h.addWidget(go)
             return holder
 
         # STR / TEXT
@@ -206,9 +217,17 @@ class SchemaForm(QtWidgets.QWidget):
     # ── 取值 ────────────────────────────────────
 
     def values(self) -> Dict[str, Any]:
-        """收集当前界面上的值（不做类型转换，交给 EngineStore.update）"""
+        """
+        收集当前界面上的值（不做类型转换，交给 EngineStore.update）。
+
+        凭据字段**不在其中** —— 它们由「凭据」页写入 .env，
+        引擎页既不读也不写，避免出现两个真值来源。
+        """
         out: Dict[str, Any] = {}
         for key, w in self._widgets.items():
+            f = self.schema.get(key)
+            if f is not None and f.is_secret:
+                continue
             if isinstance(w, QtWidgets.QCheckBox):
                 out[key] = w.isChecked()
             elif isinstance(w, QtWidgets.QComboBox):
@@ -229,6 +248,9 @@ class SchemaForm(QtWidgets.QWidget):
         """用给定配置重填表单"""
         self.clear_error()
         for key, w in self._widgets.items():
+            f = self.schema.get(key)
+            if f is not None and f.is_secret:
+                continue
             v = settings.get(key, "")
             if isinstance(w, QtWidgets.QCheckBox):
                 w.setChecked(bool(v))

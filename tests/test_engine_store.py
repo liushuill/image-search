@@ -461,3 +461,193 @@ class TestSchemaVersionMigration:
         assert store.get("iqdb").get("min_similarity") == 65
         assert store.get("traceMoe").get("min_similarity") == 85
         assert store.get("sauceNAO").get("min_similarity") == 60
+
+
+class TestSecretsNeverTouchConfig:
+    """
+    回归：凭据曾经能被写进 config.json —— 而那个文件是**入库**的，
+    等于把密钥写回版本历史（正是 P1 阶段刚清理掉的问题）。
+
+    更隐蔽的后果：引擎级的值优先于 .env，于是
+    「凭据页显示的值」和「实际生效的值」可能不是同一个。
+    """
+
+    def test_update_routes_secret_to_env(self, store):
+        from imgsearch import secrets
+        store.update("sauceNAO", api_key="SECRET-VALUE")
+        # 配置里只留空占位
+        assert store.get("sauceNAO").get("api_key") == ""
+        # 值进了 .env
+        assert secrets.get("SAUCENAO_KEY") == "SECRET-VALUE"
+
+    def test_secret_never_appears_in_config_file(self, store):
+        import imgsearch.config as cfg
+        store.update("sauceNAO", api_key="SECRET-VALUE")
+        assert "SECRET-VALUE" not in cfg._CONFIG_FILE.read_text(encoding="utf-8")
+
+    def test_secret_still_reaches_the_engine(self, store):
+        store.update("sauceNAO", api_key="SECRET-VALUE")
+        assert store.build_engine("sauceNAO").api_key == "SECRET-VALUE"
+
+    def test_secret_is_stripped(self, store):
+        """粘贴时常带上换行/空格；带空白跑起来会认证失败"""
+        from imgsearch import secrets
+        store.update("sauceNAO", api_key="  KEY-WITH-WHITESPACE\n")
+        assert secrets.get("SAUCENAO_KEY") == "KEY-WITH-WHITESPACE"
+
+    def test_empty_value_does_not_wipe_env(self, store):
+        """清空配置字段不该把 .env 里的凭据一起抹掉"""
+        from imgsearch import secrets
+        store.update("sauceNAO", api_key="KEEP-ME")
+        store.update("sauceNAO", api_key="")
+        assert secrets.get("SAUCENAO_KEY") == "KEEP-ME"
+
+    def test_save_blanks_any_smuggled_value(self, write_config):
+        """兜底：哪怕有值被直接塞进 settings，落盘前也会被清空"""
+        import imgsearch.config as cfg
+        write_config({
+            "search_engines": [{"name": "sauceNAO", "enabled": True, "priority": 1,
+                                "settings": {"api_key": "SMUGGLED"}}],
+            "search_engines_version": 5,
+        })
+        EngineStore().save()
+        assert "SMUGGLED" not in cfg._CONFIG_FILE.read_text(encoding="utf-8")
+
+    def test_legacy_secret_in_config_is_migrated_to_env(self, write_config):
+        """v4 迁移：把已经写进 config.json 的凭据搬到 .env"""
+        import imgsearch.config as cfg
+        from imgsearch import secrets
+        write_config({
+            "search_engines": [{"name": "sauceNAO", "enabled": True, "priority": 1,
+                                "settings": {"api_key": "LEGACY-KEY"}}],
+            "search_engines_version": 3,
+        })
+        s = EngineStore()
+        assert secrets.get("SAUCENAO_KEY") == "LEGACY-KEY"
+        assert s.get("sauceNAO").get("api_key") == ""
+        assert "LEGACY-KEY" not in cfg._CONFIG_FILE.read_text(encoding="utf-8")
+
+    def test_migration_strips_whitespace(self, write_config):
+        from imgsearch import secrets
+        write_config({
+            "search_engines": [{"name": "sauceNAO", "enabled": True, "priority": 1,
+                                "settings": {"api_key": "PADDED-KEY\n"}}],
+            "search_engines_version": 3,
+        })
+        EngineStore()
+        assert secrets.get("SAUCENAO_KEY") == "PADDED-KEY"
+
+
+class TestSecretEnvNameReconciliation:
+    """
+    回归：v4 迁移曾经把凭据搬到派生名 IMGSEARCH_<引擎>_<字段> 上，
+    而引擎代码读的是 SAUCENAO_KEY / DANBOORU_API_KEY ——
+    结果「搬过去了却读不到」，症状是配了 key 仍报未配置。
+    """
+
+    def _seed(self, write_config, version=4):
+        write_config({
+            "search_engines": [{"name": "sauceNAO", "enabled": True, "priority": 1,
+                                "settings": {}}],
+            "search_engines_version": version,
+        })
+
+    def test_derived_name_is_moved_to_declared(self, write_config):
+        from imgsearch import secrets
+        secrets.set("IMGSEARCH_SAUCENAO_API_KEY", "WRONG-PLACE")
+        self._seed(write_config)
+
+        EngineStore()
+
+        assert secrets.get("SAUCENAO_KEY") == "WRONG-PLACE"
+        assert not secrets.load().get("IMGSEARCH_SAUCENAO_API_KEY"), \
+            "派生名上的残留没清掉"
+
+    def test_conflict_prefers_derived_name(self, write_config):
+        """
+        冲突时以派生名为准：它来自 v4 迁移，源头是当时**实际生效**的
+        引擎级设置；正确名上那个旧值正是被盖住的那个。
+        """
+        from imgsearch import secrets
+        secrets.set("SAUCENAO_KEY", "OLD-INEFFECTIVE")
+        secrets.set("IMGSEARCH_SAUCENAO_API_KEY", "EFFECTIVE")
+        self._seed(write_config)
+
+        EngineStore()
+
+        assert secrets.get("SAUCENAO_KEY") == "EFFECTIVE"
+
+    def test_no_legacy_value_leaves_env_alone(self, write_config):
+        from imgsearch import secrets
+        secrets.set("SAUCENAO_KEY", "UNTOUCHED")
+        self._seed(write_config)
+
+        EngineStore()
+
+        assert secrets.get("SAUCENAO_KEY") == "UNTOUCHED"
+
+    def test_engine_reads_the_key_after_reconciliation(self, write_config):
+        """最终目的：引擎真的能拿到它"""
+        from imgsearch import secrets
+        secrets.set("IMGSEARCH_SAUCENAO_API_KEY", "FIXED-KEY")
+        self._seed(write_config)
+
+        store = EngineStore()
+
+        assert store.build_engine("sauceNAO").api_key == "FIXED-KEY"
+
+
+class TestResultFieldNormalization:
+    """
+    回归：SauceNAO 在不同索引下会把 creator / material 返回成**列表**
+    （如 ``["aldehyde"]``）。不归一的话写进 SQLite 会抛
+    "type 'list' is not supported"，导致**整条图库入库失败**。
+    """
+
+    def test_list_fields_are_normalized(self):
+        from imgsearch.engines.base import SearchResult
+        r = SearchResult(source="sauceNAO", similarity=93.3,
+                         artist=["aldehyde"],
+                         material=["dance dance revolution", "maimai (game)"],
+                         title=["t"], ext_urls="https://x", extra_ids={"anilist": 42})
+        assert r.artist == "aldehyde"
+        assert r.material == "dance dance revolution, maimai (game)"
+        assert r.ext_urls == ["https://x"]        # 单个字符串 → 列表
+        assert r.extra_ids == {"anilist": "42"}   # 值统一成字符串
+
+    def test_empty_list_becomes_none(self):
+        from imgsearch.engines.base import SearchResult
+        assert SearchResult(source="x", similarity=1, artist=[]).artist is None
+        assert SearchResult(source="x", similarity=1, artist="   ").artist is None
+
+    def test_page_and_similarity_coerced(self):
+        from imgsearch.engines.base import SearchResult
+        r = SearchResult(source="x", similarity="88.5", pixiv_page="2")
+        assert r.similarity == 88.5 and r.pixiv_page == 2
+        bad = SearchResult(source="x", similarity="oops", pixiv_page="oops")
+        assert bad.similarity == 0.0 and bad.pixiv_page == 0
+
+    def test_engine_with_list_field_can_be_recorded(self, library, pattern_image):
+        """端到端：字段是列表时入库必须成功"""
+        from imgsearch.engines.base import SearchResult
+        db, store = library
+        rec = store.upsert_image(str(pattern_image("a.png", seed=1234)))
+        store.save_results(rec.id, [SearchResult(
+            source="sauceNAO", similarity=93.3, artist=["aldehyde"],
+            material=["tag one", "tag two"], ext_urls=["https://x"],
+            extra_ids={"anilist": 42},
+        )])
+        loaded = store.load_results(rec.id)
+        assert len(loaded) == 1
+        assert loaded[0].artist == "aldehyde"
+        assert loaded[0].material == "tag one, tag two"
+
+    def test_save_results_survives_smuggled_container(self, library, pattern_image):
+        """兜底：即使有人绕过 __post_init__ 塞了容器，也不该整条失败"""
+        from imgsearch.engines.base import SearchResult
+        db, store = library
+        rec = store.upsert_image(str(pattern_image("b.png", seed=1235)))
+        r = SearchResult(source="x", similarity=1)
+        r.artist = {"weird": "dict"}          # 手动破坏
+        store.save_results(rec.id, [r])
+        assert len(store.load_results(rec.id)) == 1

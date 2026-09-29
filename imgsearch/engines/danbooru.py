@@ -40,6 +40,9 @@ class Danbooru(SearchEngine):
         Schema(
             # 原本要求用户去「自定义查询参数」里手填 login，隐蔽且易错。
             # 现在是独立字段，且有 .env 回退。
+            Field("api_key", "API Key", "secret", "",
+                  help="留空时从 .env 的 DANBOORU_API_KEY 读取",
+                  env_var="DANBOORU_API_KEY"),
             Field("login", "用户名", "str", "",
                   help="Danbooru 账号名；留空回退到 .env 的 DANBOORU_LOGIN",
                   env_var="DANBOORU_LOGIN", required=True,
@@ -55,7 +58,7 @@ class Danbooru(SearchEngine):
             str(self.opt("login", "") or "").strip()
             or (secrets.get("DANBOORU_LOGIN", "") or "")
         )
-        # API Key：配置优先，其次 .env
+        # API Key：配置里始终为空（凭据只存 .env），这里从 .env 回退
         self.api_key = (
             self.api_key or secrets.get("DANBOORU_API_KEY", "") or ""
         )

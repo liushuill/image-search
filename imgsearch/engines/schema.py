@@ -13,6 +13,7 @@
   - 校验只在「保存」时弹一个框，错误定位不到字段
 """
 
+import re
 from dataclasses import dataclass
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -60,6 +61,37 @@ class Field:
 
 
 # ── 类型转换与校验 ──────────────────────────────────────────
+
+
+def env_var_for(engine_name: str, field: "Field") -> str:
+    """
+    SECRET 字段对应的环境变量名（也就是它在 .env 里的落点）。
+
+    优先用字段自己声明的 ``env_var``；没有就按
+    ``IMGSEARCH_<引擎>_<字段>`` 派生 —— 目的是让**任何**密钥字段都有
+    一个稳定去处，而不是被写进 config.json。
+    """
+    if field.env_var:
+        return field.env_var
+
+    def _norm(text: str) -> str:
+        return re.sub(r"[^0-9A-Za-z]+", "_", text or "").strip("_").upper()
+
+    return f"IMGSEARCH_{_norm(engine_name)}_{_norm(field.key)}"
+
+
+def legacy_env_var_for(engine_name: str, field: "Field") -> str:
+    """
+    早期版本派生出的环境变量名（``IMGSEARCH_<引擎>_<字段>``）。
+
+    那时字段没声明 env_var，而引擎代码里读的是自己的固定名字（如
+    ``SAUCENAO_KEY``），于是凭据「搬过去了却读不到」。迁移时要把它
+    挪到正确的名字上。
+    """
+    def _norm(text: str) -> str:
+        return re.sub(r"[^0-9A-Za-z]+", "_", text or "").strip("_").upper()
+
+    return f"IMGSEARCH_{_norm(engine_name)}_{_norm(field.key)}"
 
 
 def coerce(f: Field, raw: Any) -> Any:
@@ -214,8 +246,9 @@ COMMON_SCHEMA = Schema(
     Field("api_url", "API 地址", STR, "",
           help="留空则使用引擎内置的默认地址",
           placeholder="https://example.com/search"),
-    Field("api_key", "API Key", SECRET, "",
-          help="留空时自动回退到 .env 中的同名变量（见 .env.example）"),
+    # 注意：api_key 刻意**不放在通用 schema 里** —— 只有真正需要凭据的引擎
+    # 才声明它，并且必须写清 env_var。否则 env_var_for() 会派生出一个
+    # 与引擎代码里读取的名字不同的变量，凭据就"搬过去但读不到"。
     Field("min_similarity", "最低相似度", INT, 60,
           help="低于此值视为不可信，自动搜索会继续尝试下一个引擎。"
                "⚠️ 各引擎的相似度量纲不同（同一张图 IQDB 报 53%、SauceNAO 报 95%），"

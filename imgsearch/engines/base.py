@@ -8,6 +8,24 @@ from typing import Any, Dict, List, Optional
 from imgsearch.engines.schema import COMMON_SCHEMA, Schema
 
 
+def _as_text(value) -> Optional[str]:
+    """
+    把可能是列表的字段归一成字符串。
+
+    SauceNAO 在不同索引下会把 ``creator`` / ``material`` 这类字段返回成
+    **列表**（如 ``["aldehyde"]``）。不归一的话：
+      - 写进 SQLite 会报 "type 'list' is not supported"（图库入库整个失败）
+      - CSV/GUI 里会显示成 ``['aldehyde']`` 这种带括号引号的怪样子
+    """
+    if value is None:
+        return None
+    if isinstance(value, (list, tuple, set)):
+        parts = [str(v).strip() for v in value if v is not None and str(v).strip()]
+        return ", ".join(parts) or None
+    text = str(value).strip()
+    return text or None
+
+
 @dataclass
 class SearchResult:
     """搜索结果数据类"""
@@ -27,6 +45,39 @@ class SearchResult:
     twitter_id: Optional[str] = None  # Twitter 推文 ID
     extra_ids: Dict[str, str] = field(default_factory=dict)  # 其他站点的 ID
     detail: Optional[str] = None      # 补充说明（如 TraceMoe 的片源文件名、命中时间点）
+
+    def __post_init__(self) -> None:
+        """
+        在数据类自身的边界上做归一化。
+
+        放在这里而不是各个引擎里，是因为「结果是这个形状」属于 SearchResult
+        自己的约定 —— 任何引擎（含用户自定义的）构造出来的实例都自动成立。
+        起因是一个真实 bug：SauceNAO 返回的 artist 是列表，
+        写进 SQLite 时抛 "type 'list' is not supported"，图库入库整个失败。
+        """
+        for name in ("pixiv_id", "artist", "artist_id", "title", "material",
+                     "highres_url", "thumbnail", "danbooru_id", "gelbooru_id",
+                     "twitter_id", "detail"):
+            setattr(self, name, _as_text(getattr(self, name)))
+
+        # 列表类字段统一成 str 列表 / str→str 字典
+        urls = self.ext_urls or []
+        if isinstance(urls, str):
+            urls = [urls]
+        self.ext_urls = [str(u).strip() for u in urls if u and str(u).strip()]
+
+        ids = self.extra_ids or {}
+        self.extra_ids = ({str(k): str(v) for k, v in ids.items()}
+                          if isinstance(ids, dict) else {})
+
+        try:
+            self.pixiv_page = int(self.pixiv_page or 0)
+        except (TypeError, ValueError):
+            self.pixiv_page = 0
+        try:
+            self.similarity = float(self.similarity or 0)
+        except (TypeError, ValueError):
+            self.similarity = 0.0
 
     def is_valid(self) -> bool:
         """判断结果是否有可用信息"""

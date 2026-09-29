@@ -67,6 +67,10 @@ class SauceNAO(SearchEngine):
             Field("db", "数据库索引", INT, 999,
                   help="999 = 全部数据库；5 = Pixiv，9 = Danbooru，15 = yande.re/Gelbooru",
                   minimum=0),
+            # 凭据只存 .env；界面上的值由「凭据」页维护
+            Field("api_key", "API Key", "secret", "",
+                  help="留空时从 .env 的 SAUCENAO_KEY 读取",
+                  env_var="SAUCENAO_KEY"),
             Field("numres", "返回结果数", INT, 5,
                   help="让 SauceNAO 最多返回多少条结果", minimum=1, maximum=50,
                   advanced=True),
