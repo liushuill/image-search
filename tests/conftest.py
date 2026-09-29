@@ -116,8 +116,15 @@ def pattern_image(tmp_path):
 
 
 @pytest.fixture
-def library(tmp_path):
-    """一个独立的图库（db + store），落在 tmp_path"""
+def library():
+    """
+    一个独立的图库（db + store）。
+
+    ⚠️ 刻意用 `LibraryDB()` 而非显式路径：这样它和「被测代码自己打开的图库」
+    （service.open_library → LibraryDB()）指向**同一个**文件。
+    否则测试往里写、被测代码却去读另一个空库，缓存测试会永远「未命中」
+    并真的发起网络请求。
+    """
     from imgsearch.library import LibraryDB, LibraryStore
-    with LibraryDB(tmp_path / "lib.db") as db:
+    with LibraryDB() as db:
         yield db, LibraryStore(db)

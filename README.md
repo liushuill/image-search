@@ -10,7 +10,25 @@
 
 ## 快速开始
 
-### Linux / macOS
+### 图形界面（推荐）
+
+```bash
+./run-gui.sh          # Linux（首次自动装 PySide6）
+run-gui.bat           # Windows
+```
+
+单窗口 + 侧栏，已实现三个页面：
+
+| 页面 | 作用 |
+|---|---|
+| **搜索** | 拖入图片即搜；结果表可复制/打开链接；缓存命中会明确标注「未消耗配额」 |
+| **引擎** | 按各引擎自己的 Schema 自动生成配置表单；「测试」按钮只做配置自检与端点连通性检查，**不消耗搜索配额** |
+| **凭据** | 填 SauceNAO / Danbooru 的 Key，程序写进 `.env` 并设为 600 —— **你不需要打开那个文件** |
+
+> 已实测在 KDE Wayland 下使用**原生 wayland 平台插件**（`platformName() == "wayland"`），
+> 不走 XWayland 转译，因此拖拽与 HiDPI 都是原生行为。
+
+### 命令行
 
 ```bash
 ./run.sh config secrets            # 查看凭据状态
@@ -230,9 +248,15 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（265 项）
+├── tests/                     ← pytest（282 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
-├── run.sh / run.bat           ← 启动器（自动建 venv）
+├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
+│   ├── main_window.py         ←   单窗口 + 侧栏
+│   ├── workers.py             ←   后台搜索线程（含 stdout 桥接，拿到引擎实时进度）
+│   ├── pages/                 ←   搜索 / 引擎 / 凭据
+│   └── widgets/               ←   拖拽区 / Schema 表单 / 结果表
+├── run.sh / run.bat           ← CLI 启动器（自动建 venv）
+├── run-gui.sh / run-gui.bat   ← GUI 启动器
 ├── run_cli.py                 ← 单文件入口（供打包用）
 ├── gui.py                     ← 旧 tkinter GUI（待迁移到 PySide6）
 └── requirements*.txt          ← 依赖（唯一的依赖声明来源）
@@ -308,11 +332,26 @@ image-search/
 上层判定「代理不可用，本次直连」并传入 `None` 后，引擎会 `or` 回退去读配置，
 把那个坏代理又捡回来，**自动降级被彻底架空**。已改为代理只由调用方决定。
 
+**P5（第一轮）— Qt6 GUI**
+
+- ✅ 单窗口 + 侧栏；原生 Wayland；原生拖拽
+- ✅ **搜索页**：拖入即搜、结果表、复制/打开链接、缓存命中标注
+- ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
+- ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
+- ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
+- ✅ 测试 265 → **282 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+
+**顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
+重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象
+（stdout 桥接），那种对象没有 `buffer` —— 由于 `cli` 是惰性导入的，
+症状表现为「搜索时报一个和编码毫无关系的 AttributeError」。
+现在包装前会确认对方真的有 `.buffer`，桥接对象也声明自身 `encoding="utf-8"`。
+
 待办：
 
 - ⏳ 多格式导出（urls.txt / CSV / JSON / HTML 缩略图墙 / 剪贴板）
-- ⏳ GUI 迁移到 PySide6（Qt6）：原生拖拽、Schema 配置表单、
-  **凭据录入页（用户无需手编 .env）**、图库路径管理页、清理页
+- ⏳ GUI 第二轮：**图库路径管理页**（添加/移除并询问是否清理持久化数据）
+  与**独立清理页**（按路径/按类别、先预演后执行、显示真实回收量）
 
 ### 已在代理下复测（2026-09）
 

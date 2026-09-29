@@ -39,12 +39,24 @@
 import io
 import sys
 
-# 强制 stdout/stderr 使用 UTF-8 编码，确保中文和特殊字符正常显示
-# 仅在编码不是 utf-8 时才重新包装，避免重复导入时报错
-if getattr(sys.stdout, 'encoding', '').upper() != 'UTF-8':
-    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
-if getattr(sys.stderr, 'encoding', '').upper() != 'UTF-8':
-    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+def _force_utf8(stream):
+    """
+    把非 UTF-8 的标准流重新包装成 UTF-8，保证中文正常显示。
+
+    ⚠️ 必须确认对方有 ``.buffer`` 再包：GUI 会把 stdout 换成自定义对象
+    （见 imgsearch_gui.workers 的 stdout 桥接），那种对象没有 buffer，
+    直接访问会在 **import 期**就抛 AttributeError ——
+    而 imgsearch.cli 是被惰性导入的，症状表现为「搜索时报一个和编码毫无关系的错」。
+    """
+    if getattr(stream, "encoding", "").upper() == "UTF-8":
+        return stream
+    if not hasattr(stream, "buffer"):
+        return stream
+    return io.TextIOWrapper(stream.buffer, encoding="utf-8", errors="replace")
+
+
+sys.stdout = _force_utf8(sys.stdout)
+sys.stderr = _force_utf8(sys.stderr)
 
 import argparse
 import csv
@@ -59,7 +71,7 @@ from imgsearch import secrets
 from imgsearch.config import get, save_config, load_config, is_secret_key, PROJECT_DIR
 from imgsearch.engines.registry import resolve_engine_class
 from imgsearch.engines.schema import ConfigError
-from imgsearch.library import LibraryError
+from imgsearch.service import search_with_cache
 from imgsearch.engines.store import (
     EngineConfig,
     EngineNotFoundError,
@@ -85,58 +97,6 @@ def _print_secrets():
         print()
         print("  💡 初始化：cp .env.example .env && chmod 600 .env")
     print(f"  📄 文件：{secrets.ENV_FILE}")
-
-
-def _open_library():
-    """
-    打开本地图库。
-
-    图库属于「锦上添花」：它坏了不该让搜索也用不了，
-    因此这里吞掉异常并给出提示，返回 (None, None)。
-    """
-    if not get("use_library", True):
-        return None, None
-    try:
-        from imgsearch.library import LibraryDB, LibraryStore
-        db = LibraryDB()
-        return db, LibraryStore(db)
-    except Exception as e:
-        print(f"  ⚠️ 图库不可用（{e}），本次不查缓存、不记录")
-        return None, None
-
-
-def _report_cache_hit(store, match) -> None:
-    """命中图库缓存时的输出"""
-    rec = match.record
-    kind = {
-        "exact": "同一张",
-        "scaled": "同一张（不同尺寸的版本）",
-        "similar": "视觉相近（可能不是同一张）",
-    }[match.kind]
-
-    print(f"\n📚 图库命中：这张图搜过了 —— {kind}")
-    print(f"   记录 id={rec.id} · dHash={rec.dhash}"
-          + (f" · 距离 {match.distance}" if match.distance else ""))
-    print(f"   首次入库 {rec.first_seen}")
-    if match.kind == "similar":
-        print("   ⚠️ 只是视觉相近；要确认请加 --refresh 重新搜索")
-        print("      （调高该引擎的 min_similarity 可减少这类弱命中）")
-    print("   —— 以下结果来自本地缓存，未消耗任何搜索配额 ——")
-    print_results(store.load_results(rec.id))
-    print("💡 强制重新搜索：加 --refresh")
-
-
-def _record_to_library(store, image_path: str, results) -> None:
-    """把搜索结果记入图库；失败不打断主流程"""
-    try:
-        rec = store.upsert_image(image_path)
-        store.save_results(rec.id, results)
-        if get("cache_thumbnails", True):
-            from imgsearch.library import thumbs
-            thumbs.ensure(rec.dhash, image_path)
-        print(f"\n📚 已记入图库（记录 id={rec.id}）—— 下次同图可直接复用结果")
-    except Exception as e:
-        print(f"\n  ⚠️ 记入图库失败：{e}")
 
 
 def cmd_search(args):
@@ -178,32 +138,17 @@ def cmd_search(args):
     if file_hash:
         print(f"🔑 文件哈希: {file_hash}")
 
-    # ── 先查图库：这张搜过了吗？──
-    # 图库以 dHash 内容为身份，所以文件被移到任何地方都能命中，
-    # 命中就直接复用缓存结果，不再消耗搜索配额。
-    lib_db, lib = _open_library()
-    if lib is not None and not args.refresh:
-        try:
-            match = lib.lookup(image_path)
-        except LibraryError as e:
-            match = None
-            print(f"  ⚠️ 图库查找失败：{e}")
-        if match is not None:
-            if lib.has_results(match.record.id):
-                _report_cache_hit(lib, match)
-                return
-            print(f"  📚 图库里有这张图（id={match.record.id}），"
-                  f"但还没有搜索结果 —— 继续搜索")
-
     print(f"\n🔍 正在搜索: {file_path.name}")
     print("=" * 50)
 
-    # 搜索
+    # 查缓存 → 联网搜索 → 入库，统一走 service（GUI 用的是同一段逻辑）
     # 指定单个引擎时错误会向上抛（auto 模式则在内部跳过并继续），
     # 这里统一转成可读提示，不让用户看到原始 traceback。
     try:
-        results = search_image(image_path, engine=engine,
-                               min_similarity=args.min_similarity)
+        outcome = search_with_cache(
+            image_path, engine=engine, refresh=args.refresh,
+            min_similarity=args.min_similarity,
+        )
     except EngineNotFoundError as e:
         print(f"\n❌ {e}")
         sys.exit(1)
@@ -219,6 +164,8 @@ def cmd_search(args):
         print("   · 网络/代理是否可用： imgsearch config show")
         sys.exit(1)
 
+    results = outcome.results
+
     if not results:
         print("\n❌ 未找到匹配结果")
         sys.exit(0)
@@ -226,9 +173,8 @@ def cmd_search(args):
     # 显示结果
     print_results(results)
 
-    # 记入图库（含缩略图缓存），下次同图直接复用
-    if lib is not None:
-        _record_to_library(lib, image_path, results)
+    if outcome.from_cache:
+        print("💡 这是缓存结果；要重新联网搜索请加 --refresh")
 
     # 生成 URL
     if args.url:
