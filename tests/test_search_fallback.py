@@ -227,3 +227,84 @@ class TestProxyRouting:
 
         search_image("x.png", engine="sauceNAO")
         assert engines["sauceNAO"].proxies_seen is None
+
+
+class TestEnginesDoNotReadProxyThemselves:
+    """
+    回归：代理的决策权只能归调用方。
+
+    曾经引擎里写的是 ``create_session(proxies=self.proxies or get_proxies())``。
+    于是上层一旦判定「代理不可用，本次直连」并传入 None，
+    引擎就会 ``or`` 回退去读配置，把那个坏代理捡回来 ——
+    自动降级被彻底架空，表现为「明明提示已降级直连，请求却仍走代理并失败」。
+    """
+
+    def _freeze(self, monkeypatch, module):
+        """拦住 create_session，记录它收到的 proxies"""
+        seen = {}
+
+        def fake_create_session(**kwargs):
+            seen.update(kwargs)
+            raise RuntimeError("到此为止，不真的发请求")
+
+        monkeypatch.setattr(module, "create_session", fake_create_session)
+        return seen
+
+    def test_iqdb_ignores_config_proxy_when_given_none(self, monkeypatch):
+        import imgsearch.config as cfg
+        import imgsearch.engines.iqdb as mod
+        cfg.load_config()["proxy"] = "http://127.0.0.1:7897"
+
+        seen = self._freeze(monkeypatch, mod)
+        eng = mod.Iqdb()          # 不传 proxies → 上层已判定直连
+        with pytest.raises(RuntimeError):
+            eng.search_by_url("https://example.com/x.png")
+        assert seen.get("proxies") is None, "引擎把配置里的代理又捡回来了"
+
+    def test_iqdb_uses_explicit_proxy(self, monkeypatch):
+        import imgsearch.engines.iqdb as mod
+        seen = self._freeze(monkeypatch, mod)
+        eng = mod.Iqdb(proxies={"https": "http://127.0.0.1:7897"})
+        with pytest.raises(RuntimeError):
+            eng.search_by_url("https://example.com/x.png")
+        assert seen.get("proxies") == {"https": "http://127.0.0.1:7897"}
+
+    def test_saucenao_ignores_config_proxy_when_given_none(self, monkeypatch):
+        import imgsearch.config as cfg
+        import imgsearch.engines.saucenao as mod
+        cfg.load_config()["proxy"] = "http://127.0.0.1:7897"
+
+        seen = self._freeze(monkeypatch, mod)
+        eng = mod.SauceNAO(api_key="k")
+        with pytest.raises(RuntimeError):
+            eng.search_by_url("https://example.com/x.png")
+        assert seen.get("proxies") is None
+
+
+class TestProxyProbeCache:
+    def test_probe_result_is_cached(self, monkeypatch):
+        """断网时不该每张图都白等一次 5 秒探测"""
+        import imgsearch.config as cfg
+        cfg._proxy_probe_cache.update(key=None, at=0.0, ok=False)
+
+        calls = []
+
+        class FakeResp:
+            status_code = 204
+
+        def fake_get(url, **kwargs):
+            calls.append(url)
+            return FakeResp()
+
+        import requests
+        monkeypatch.setattr(requests, "get", fake_get)
+
+        p = {"http": "http://127.0.0.1:7897"}
+        assert cfg.check_proxy(p) is True
+        assert cfg.check_proxy(p) is True
+        assert len(calls) == 1, "探活结果没有被缓存"
+
+        # 环境变了（比如代理刚起来）应能通过 TTL 后重新探测
+        cfg._proxy_probe_cache.update(key=None, at=0.0, ok=False)
+        assert cfg.check_proxy(p) is True
+        assert len(calls) == 2

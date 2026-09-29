@@ -69,6 +69,75 @@ SAUCENAO_KEY=xxx ./run.sh search 图片.jpg
 
 ---
 
+## 本地图库
+
+### 为什么要以「内容」而不是「路径」为身份
+
+实际工作流是：**搜完一批图 → 下载原图 → 把图统一移到「搜集过的」目录**。
+文件路径会不断变化，所以：
+
+- 图片身份 = **dHash 感知哈希**，路径只是**可变的「最后已知位置」**
+- 文件移到任何目录，都能凭 dHash 认出「这张搜过了」，**直接复用缓存结果**
+- 这意味着**不重复消耗搜索配额**（SauceNAO 免费版只有 100 次/天）
+
+```bash
+./run.sh search 某张图.jpg          # 首次：正常搜索，并自动记入图库
+./run.sh search 这张图的新位置.jpg   # 之后：图库命中，零配额消耗
+./run.sh search 某张图.jpg --refresh # 想重新搜：加 --refresh
+```
+
+```
+📚 图库命中：这张图搜过了 —— 同一张
+   记录 id=1 · dHash=d6b2ced6b2b39184
+   —— 以下结果来自本地缓存，未消耗任何搜索配额 ——
+```
+
+### 路径管理
+
+```bash
+./run.sh library add /path/to/图库 --label 图片库   # 手动登记（可多个，支持尚未挂载的外接盘）
+./run.sh library list                               # 路径列表 + 状态 + 每路径统计
+./run.sh library relocate 1 /新位置                  # 目录被改名/搬走：重新指定，记录路径一起改写
+./run.sh library refresh                            # 重新检查文件是否还在原位（不会删记录）
+./run.sh library find 某张图.jpg                     # 这张搜过了吗（与文件名、路径无关）
+```
+
+- **拒绝嵌套**：`图片库/` 与 `图片库/待查/` 不能同时登记 —— 否则同一张图会被记两次。
+  添加时就会明确告知与哪条路径冲突。
+- **失效路径只标记、不清数据**：外接盘未挂载或目录改名时标出来，用 `relocate` 指定新位置即可。
+
+### 清理持久化数据
+
+```bash
+./run.sh library stats                              # 按路径 + 按类别的占用明细
+./run.sh library clean --results                    # 清空搜索结果（保留图片记录与 dHash 索引）
+./run.sh library clean --thumbs                     # 清空缓存缩略图
+./run.sh library clean --path 3 --images --thumbs    # 清空某条路径的全部数据
+./run.sh library clean --orphans                    # 清理孤立缩略图
+./run.sh library remove 3 --purge all               # 移除路径时顺带清空其数据
+```
+
+- 清理前会先**预演**（显示将删除多少条、约多少体积），再要求确认；`--yes` 跳过确认。
+- ⚠️ 每次清理后都会 **`checkpoint → VACUUM → checkpoint`**。
+  SQLite 的 `DELETE` 只把页标记为可复用、文件不会缩小；而 WAL 模式下
+  `VACUUM` 的产物又先落在 `-wal` 里 —— 不 checkpoint 的话磁盘占用**看起来不降反升**。
+  这就是「清了半天发现文件没变小」的根因。实测 20000 条记录：**15.4 MB → 56 KB**。
+
+### 判重档位
+
+匹配结果会如实告知，不把「相似」当成「同一张」：
+
+| 判定 | 含义 |
+|---|---|
+| `exact` | dHash 相同且尺寸相同 —— 基本就是同一张（可能被重新编码过） |
+| `scaled` | dHash 距离很小但尺寸不同 —— 同一张画的缩放版 |
+| `similar` | dHash 距离在阈值内且尺寸相同 —— 视觉接近，需人工确认 |
+
+实测：一张 400×300 的原图与它「缩到一半 + 质量 30」的版本，dHash 距离仅 **1**，
+判定为 `scaled` —— 正是「质量被压缩、想找原图」要解决的场景。
+
+---
+
 ## 搜索引擎
 
 ```bash
@@ -151,11 +220,17 @@ image-search/
 │   │   ├── store.py           ←   EngineStore：配置的唯一数据源
 │   │   ├── quota.py           ←   滑动窗口限流（跨进程有效）
 │   │   └── saucenao / iqdb / ascii2d / tracemoe / danbooru
+│   ├── library/               ← 本地图库（以 dHash 内容为身份）
+│   │   ├── db.py              ←   SQLite schema 与迁移
+│   │   ├── paths.py           ←   根路径登记（拒绝嵌套 / 失效检测 / 重新指定）
+│   │   ├── store.py           ←   按内容查找与写入、缓存结果复用
+│   │   ├── thumbs.py          ←   按内容存放的缩略图缓存
+│   │   └── cleanup.py         ←   占用统计与清理（含 VACUUM 回收）
 │   ├── links/pixiv.py         ← Pixiv 图片直链模板管理
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（202 项）
+├── tests/                     ← pytest（265 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── run.sh / run.bat           ← 启动器（自动建 venv）
 ├── run_cli.py                 ← 单文件入口（供打包用）
@@ -218,11 +293,26 @@ image-search/
 - ✅ 按引擎的代理路由 `proxy_mode`；连接失败不再白等间隔
 - ✅ 测试从 94 项扩到 **202 项**，且全部隔离到临时目录（不再碰真实配置）
 
+**P3 — 本地图库（核心层）**
+
+- ✅ SQLite 图库，**以 dHash 内容为身份**、路径只作「最后已知位置」，
+  因此文件移动后仍能认出「这张搜过了」并复用结果（省搜索配额）
+- ✅ 多根路径手动登记；拒绝嵌套；失效路径标记与重新指定
+- ✅ 按路径 / 按类别的占用统计
+- ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
+  每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
+- ✅ 测试 202 → **265 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+
+**顺带修掉的一个真 bug**：引擎里写的是
+``create_session(proxies=self.proxies or get_proxies())`` ——
+上层判定「代理不可用，本次直连」并传入 `None` 后，引擎会 `or` 回退去读配置，
+把那个坏代理又捡回来，**自动降级被彻底架空**。已改为代理只由调用方决定。
+
 待办：
 
-- ⏳ SQLite 本地图库（去重 + 缓存命中）
 - ⏳ 多格式导出（urls.txt / CSV / JSON / HTML 缩略图墙 / 剪贴板）
-- ⏳ GUI 迁移到 PySide6（Qt6）：原生拖拽、Schema 配置表单
+- ⏳ GUI 迁移到 PySide6（Qt6）：原生拖拽、Schema 配置表单、
+  **凭据录入页（用户无需手编 .env）**、图库路径管理页、清理页
 
 ### 已在代理下复测（2026-09）
 

@@ -27,6 +27,8 @@ def isolated_workspace(tmp_path, monkeypatch):
     """
     import imgsearch.config as cfg
     import imgsearch.engines.quota as quota
+    import imgsearch.library.db as lib_db
+    import imgsearch.library.thumbs as lib_thumbs
     import imgsearch.engines.registry as registry
     import imgsearch.engines.store as store_mod
     import imgsearch.secrets as secrets
@@ -42,6 +44,11 @@ def isolated_workspace(tmp_path, monkeypatch):
     monkeypatch.setattr(cfg, "CACHE_DIR", data_dir / "cache")
     monkeypatch.setattr(cfg, "DB_PATH", data_dir / "image_metadata.db")
     monkeypatch.setattr(quota, "DATA_DIR", data_dir)
+
+    # 这两个模块用 `from ... import X` 绑定了名字，必须打在它们自己的命名空间上，
+    # 否则测试仍会写到真实的 data/ 目录
+    monkeypatch.setattr(lib_db, "DB_PATH", data_dir / "image_metadata.db")
+    monkeypatch.setattr(lib_thumbs, "THUMBS_DIR", data_dir / "thumbs")
 
     monkeypatch.setattr(secrets, "ENV_FILE", tmp_path / ".env")
     secrets.invalidate_cache()
@@ -78,3 +85,39 @@ def write_config():
         cfg._config = None
 
     return _write
+
+
+@pytest.fixture
+def pattern_image(tmp_path):
+    """
+    生成有结构的测试图。
+
+    ⚠️ 不能用纯色图：纯色图的 dHash 全部为 0，彼此无法区分，
+    会把「按内容判重」的测试变成永远命中。
+
+    ⚠️ 相对路径一律落到 tmp_path：否则图片会写进仓库根目录造成污染，
+    而且后续 rename 可能跨设备失败。
+    """
+    def _make(path, seed=0, size=(90, 70)):
+        from PIL import Image, ImageDraw
+        p = Path(path)
+        if not p.is_absolute():
+            p = tmp_path / p
+        p.parent.mkdir(parents=True, exist_ok=True)
+        img = Image.new("RGB", size, "white")
+        d = ImageDraw.Draw(img)
+        for i in range(6):
+            x = (seed * 17 + i * 13) % size[0]
+            d.rectangle((x, 0, x + 6 + (seed % 7), size[1]),
+                        fill=((i * 40 + seed * 11) % 256, (seed * 30) % 256, 120))
+        img.save(p)
+        return p
+    return _make
+
+
+@pytest.fixture
+def library(tmp_path):
+    """一个独立的图库（db + store），落在 tmp_path"""
+    from imgsearch.library import LibraryDB, LibraryStore
+    with LibraryDB(tmp_path / "lib.db") as db:
+        yield db, LibraryStore(db)

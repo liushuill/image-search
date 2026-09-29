@@ -24,7 +24,6 @@ from bs4 import BeautifulSoup
 
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import BOOL, COMMON_SCHEMA, Field, Schema
-from imgsearch.config import get_proxies
 from imgsearch.utils.network import create_session
 
 
@@ -101,7 +100,7 @@ class Ascii2D(SearchEngine):
         虽然结果是按颜色匹配的，但后续可以切换到 detail 视图。
         """
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
             use_cloudscraper=self.bypass_cfw,
         )
@@ -135,7 +134,7 @@ class Ascii2D(SearchEngine):
             图片的公开 URL
         """
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
             use_cloudscraper=self.bypass_cfw,
         )
@@ -173,7 +172,7 @@ class Ascii2D(SearchEngine):
             搜索结果列表
         """
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
             use_cloudscraper=self.bypass_cfw,
         )
@@ -211,7 +210,7 @@ class Ascii2D(SearchEngine):
         """解析 Ascii2D 结果页面"""
         results = []
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
             use_cloudscraper=self.bypass_cfw,
         )

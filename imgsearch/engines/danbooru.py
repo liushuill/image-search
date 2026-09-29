@@ -23,7 +23,6 @@ from PIL import Image
 from imgsearch import secrets
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import COMMON_SCHEMA, Field, Schema
-from imgsearch.config import get_proxies
 from imgsearch.utils.network import create_session
 
 
@@ -119,7 +118,7 @@ class Danbooru(SearchEngine):
     ) -> List[SearchResult]:
         """调用 Danbooru IQDB API"""
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
         )
 

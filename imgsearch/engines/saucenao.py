@@ -22,7 +22,7 @@ from imgsearch.engines.quota import SlidingWindowQuota
 from imgsearch.engines.schema import (
     COMMON_SCHEMA, INT, Field, RATE_LIMIT_SCHEMA, Schema,
 )
-from imgsearch.config import get_proxies, PROJECT_DIR
+from imgsearch.config import PROJECT_DIR
 from imgsearch.utils.network import create_session
 
 
@@ -154,7 +154,7 @@ class SauceNAO(SearchEngine):
         self._check_daily_quota()
 
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
         )
 

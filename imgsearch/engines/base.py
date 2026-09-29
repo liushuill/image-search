@@ -87,6 +87,11 @@ class SearchEngine:
                  **options):
         self.api_key = api_key or ""
         self.timeout = int(timeout) if timeout else 30
+        # ⚠️ 代理**只**用调用方传入的值，引擎自己不读配置。
+        # 曾经这里写成 `self.proxies or get_proxies()`，导致上层
+        # 已经判定「代理不可用、本次直连」并传 None 之后，
+        # 引擎又去读配置把那个坏代理捡回来 —— 自动降级被彻底架空。
+        # 代理该不该用由调用方（search_image / EngineStore）决定。
         self.proxies = proxies
         # api_url 留空时回退到引擎内置默认地址
         self.api_url = api_url or self.DEFAULT_API_URL or ""

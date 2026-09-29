@@ -27,6 +27,8 @@ DATA_DIR = PROJECT_DIR / "data"
 CACHE_DIR = DATA_DIR / "cache"
 # 数据库路径（SQLite 图库）
 DB_PATH = DATA_DIR / "image_metadata.db"
+# 缩略图缓存目录（按内容哈希分桶存放，与文件路径无关）
+THUMBS_DIR = DATA_DIR / "thumbs"
 
 _CONFIG_FILE = PROJECT_DIR / "config.json"
 
@@ -43,6 +45,10 @@ _DEFAULT_CONFIG = {
     "proxy_check_url": "https://www.google.com/generate_204",
     # 搜索引擎列表由 EngineStore 管理，此处仅作为初始值
     "search_engines": [],
+    # 本地图库：搜索前先查缓存（命中就不再消耗配额），搜索后自动记录
+    "use_library": True,
+    # 是否为已入库的图生成缩略图缓存（清理页可单独清掉这一类）
+    "cache_thumbnails": True,
 }
 
 _config = None
@@ -50,7 +56,7 @@ _config = None
 
 def _ensure_dirs():
     """确保必要的目录存在"""
-    for d in [OUTPUT_DIR, DATA_DIR, CACHE_DIR]:
+    for d in [OUTPUT_DIR, DATA_DIR, CACHE_DIR, THUMBS_DIR]:
         d.mkdir(parents=True, exist_ok=True)
 
 
@@ -152,6 +158,11 @@ def get_proxies():
     return None
 
 
+# 代理探活结果缓存：(代理串, 时间戳, 结果)。断网时每张图都探一次 5 秒太亏。
+_proxy_probe_cache = {"key": None, "at": 0.0, "ok": False}
+_PROXY_PROBE_TTL = 30.0
+
+
 def check_proxy(proxies: dict = None, timeout: int = 5) -> bool:
     """
     测试代理是否可用。
@@ -169,6 +180,14 @@ def check_proxy(proxies: dict = None, timeout: int = 5) -> bool:
     """
     if not proxies:
         return False
+
+    import time
+    key = str(sorted(proxies.items()))
+    now = time.time()
+    if (_proxy_probe_cache["key"] == key
+            and now - _proxy_probe_cache["at"] < _PROXY_PROBE_TTL):
+        return _proxy_probe_cache["ok"]
+
     try:
         import requests
         resp = requests.get(
@@ -176,9 +195,12 @@ def check_proxy(proxies: dict = None, timeout: int = 5) -> bool:
             proxies=proxies,
             timeout=timeout,
         )
-        return resp.status_code in (200, 204)
+        ok = resp.status_code in (200, 204)
     except Exception:
-        return False
+        ok = False
+
+    _proxy_probe_cache.update(key=key, at=now, ok=ok)
+    return ok
 
 
 # 首次加载（同时确保目录存在）

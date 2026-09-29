@@ -30,7 +30,6 @@ from PIL import Image
 
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import COMMON_SCHEMA, STR, Field, Schema
-from imgsearch.config import get_proxies
 from imgsearch.utils.network import create_session
 
 # iqdb.org 首页表单默认勾选的服务
@@ -136,7 +135,7 @@ class Iqdb(SearchEngine):
 
     def _post(self, files: dict = None, data: dict = None) -> List[SearchResult]:
         session = create_session(
-            proxies=self.proxies or get_proxies(),
+            proxies=self.proxies,
             timeout=self.timeout,
         )
 
