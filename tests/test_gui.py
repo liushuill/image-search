@@ -6,36 +6,24 @@ GUI 测试（offscreen）
 结果表辅助函数、后台搜索线程 + stdout 桥接。
 """
 
-import os
+import pytest
 
-# 必须在导入 PySide6 之前设置
-os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+pytest.importorskip("PySide6")          # offscreen 平台在 conftest 里统一设置
 
-import pytest  # noqa: E402
-
-pytest.importorskip("PySide6")
-
-from PySide6 import QtCore, QtGui, QtWidgets  # noqa: E402
+from PySide6 import QtCore               # noqa: E402
 
 from imgsearch.engines.base import SearchResult  # noqa: E402
 
 
-@pytest.fixture(scope="session")
-def qapp():
-    """整个测试会话共用一个 QApplication"""
-    from imgsearch_gui.app import create_app
-    app = create_app([])
-    yield app
-
-
 class TestMainWindow:
-    def test_constructs(self, qapp):
+    EXPECTED = ["SearchPage", "LibraryPage", "CleanupPage", "EnginesPage", "CredentialsPage"]
+
+    def test_all_pages_present(self, qapp):
         from imgsearch_gui.main_window import MainWindow
         win = MainWindow()
         try:
-            assert win.pages.count() == 3          # 搜索 / 引擎 / 凭据
-            names = [type(win.pages.widget(i)).__name__ for i in range(3)]
-            assert names == ["SearchPage", "EnginesPage", "CredentialsPage"]
+            names = [type(win.pages.widget(i)).__name__ for i in range(win.pages.count())]
+            assert names == self.EXPECTED
         finally:
             win.close()
 
@@ -49,14 +37,27 @@ class TestMainWindow:
         finally:
             win.close()
 
-    def test_nav_marks_unbuilt_pages(self, qapp):
+    def test_every_nav_is_wired_and_clickable(self, qapp):
+        """导航项必须真的能切页，不留「点了没反应」的死按钮"""
         from imgsearch_gui.main_window import MainWindow
         win = MainWindow()
         try:
-            texts = [b.text() for b in win._navs]
-            assert "搜索" in texts and "引擎" in texts and "凭据" in texts
-            # 图库/清理尚未实现，应明确标注而不是给一个点了没反应的按钮
-            assert any("即将推出" in t for t in texts)
+            assert len(win._navs) == len(self.EXPECTED)
+            for i, btn in enumerate(win._navs):
+                assert btn.isEnabled(), f"{btn.text()} 不可点"
+                assert "即将推出" not in btn.text()
+                btn.click()
+                qapp.processEvents()
+                assert win.pages.currentIndex() == i
+        finally:
+            win.close()
+
+    def test_status_bar_reports_state(self, qapp):
+        from imgsearch_gui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            text = win._status_label.text()
+            assert "凭据" in text and "图库" in text
         finally:
             win.close()
 

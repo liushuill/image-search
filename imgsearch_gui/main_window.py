@@ -8,6 +8,8 @@ from imgsearch import secrets
 from imgsearch.engines.store import get_store
 from imgsearch_gui.pages.credentials_page import CredentialsPage
 from imgsearch_gui.pages.engines_page import EnginesPage
+from imgsearch_gui.pages.cleanup_page import CleanupPage
+from imgsearch_gui.pages.library_page import LibraryPage
 from imgsearch_gui.pages.search_page import SearchPage
 
 
@@ -52,22 +54,17 @@ class MainWindow(QtWidgets.QMainWindow):
         self._navs = []
 
         specs = [
-            ("搜索", SearchPage, True),
-            ("引擎", EnginesPage, True),
-            ("凭据", CredentialsPage, True),
-            ("图库", None, False),
-            ("清理", None, False),
+            ("搜索", SearchPage),
+            ("图库", LibraryPage),
+            ("清理", CleanupPage),
+            ("引擎", EnginesPage),
+            ("凭据", CredentialsPage),
         ]
-        for index, (name, cls, enabled) in enumerate(specs):
+        for index, (name, cls) in enumerate(specs):
+            page = cls()
+            self.pages.addWidget(page)
             btn = NavButton(name)
-            if enabled:
-                page = cls()
-                self.pages.addWidget(page)
-                btn.clicked.connect(lambda _=False, i=index: self.pages.setCurrentIndex(i))
-            else:
-                btn.setEnabled(False)
-                btn.setToolTip("下一轮实现")
-                btn.setText(f"{name}（即将推出）")
+            btn.clicked.connect(lambda _=False, i=index: self.pages.setCurrentIndex(i))
             sl.addWidget(btn)
             self._navs.append(btn)
 
@@ -95,12 +92,19 @@ class MainWindow(QtWidgets.QMainWindow):
         self._status_label = QtWidgets.QLabel()
         bar.addPermanentWidget(self._status_label)
 
-        # 页面联动：引擎/凭据变化后刷新搜索页与状态条
-        self.engines_page = self.pages.widget(1)
-        self.credentials_page = self.pages.widget(2)
+        # 页面联动
         self.search_page = self.pages.widget(0)
+        self.library_page = self.pages.widget(1)
+        self.cleanup_page = self.pages.widget(2)
+        self.engines_page = self.pages.widget(3)
+        self.credentials_page = self.pages.widget(4)
+
+        # 引擎/凭据变化 → 刷新搜索页的引擎下拉与状态条
         self.engines_page.changed.connect(self._on_config_changed)
         self.credentials_page.saved.connect(self._on_config_changed)
+        # 图库/清理互相影响（清掉数据后统计要跟着变）
+        self.library_page.changed.connect(self._on_library_changed)
+        self.cleanup_page.changed.connect(self._on_library_changed)
 
         self._navs[0].setChecked(True)
         self.refresh_status()
@@ -109,6 +113,11 @@ class MainWindow(QtWidgets.QMainWindow):
 
     def _on_config_changed(self) -> None:
         self.search_page.reload_engines()
+        self.refresh_status()
+
+    def _on_library_changed(self) -> None:
+        self.library_page.reload()
+        self.cleanup_page.reload()
         self.refresh_status()
 
     def refresh_status(self) -> None:

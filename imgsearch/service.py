@@ -15,7 +15,6 @@ from typing import Callable, List, Optional
 from imgsearch.config import get
 from imgsearch.engines.base import SearchResult
 from imgsearch.library import LibraryDB, LibraryError, LibraryStore
-from imgsearch.library.paths import RootManager
 
 
 @dataclass
@@ -162,28 +161,3 @@ def search_with_cache(
         outcome.record_id = record_to_library(store, image_path, results)
 
     return outcome
-
-
-# ──────────────────────────────────────────────
-#  图库路径的便捷封装（供 GUI 使用）
-# ──────────────────────────────────────────────
-
-
-def add_library_path(path: str, label: str = "") -> str:
-    """
-    登记图库路径。
-
-    Returns:
-        成功时返回空串；失败返回面向用户的错误说明（调用方直接展示）。
-    """
-    with LibraryDB() as db:
-        try:
-            root = RootManager(db).add(path, label=label)
-        except LibraryError as e:
-            return str(e)
-        return "" if root.exists else ""
-
-def library_roots() -> list:
-    """列出已登记根路径（供 GUI 展示）"""
-    with LibraryDB() as db:
-        return RootManager(db).list()

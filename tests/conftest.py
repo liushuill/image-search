@@ -6,10 +6,14 @@ pytest 全局配置
    因此测试绝不会读写你真实的配置、配额与凭据
 """
 
+import os
 import sys
 from pathlib import Path
 
 import pytest
+
+# ⚠️ 必须在导入 PySide6 之前设置：GUI 测试要能在无显示环境下跑（也便于进 CI）
+os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -128,3 +132,12 @@ def library():
     from imgsearch.library import LibraryDB, LibraryStore
     with LibraryDB() as db:
         yield db, LibraryStore(db)
+
+
+@pytest.fixture(scope="session")
+def qapp():
+    """整个测试会话共用一个 QApplication（Qt 只允许存在一个）"""
+    pytest.importorskip("PySide6")
+    from imgsearch_gui.app import create_app
+    app = create_app([])
+    yield app
