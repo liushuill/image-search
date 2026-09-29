@@ -34,10 +34,10 @@ def add_parser(subparsers) -> None:
     p.add_argument(
         "action",
         choices=["add", "list", "remove", "relocate", "find", "stats",
-                 "clean", "forget", "refresh"],
+                 "clean", "forget", "refresh", "sql"],
         help="add 登记路径 | list 路径列表 | remove 移除路径 | relocate 重新指定位置 | "
              "find 查这张图搜过没 | stats 占用总览 | clean 清理 | forget 忘记某张图 | "
-             "refresh 刷新文件存在状态",
+             "refresh 刷新文件存在状态 | sql 直接查数据库",
     )
     p.add_argument("target", nargs="?", help="路径 / 根路径 id / 图片文件")
     p.add_argument("extra", nargs="?", help="relocate 时的新路径")
@@ -55,6 +55,13 @@ def add_parser(subparsers) -> None:
     p.add_argument("--orphans", action="store_true",
                    help="clean 时清理孤立缩略图（数据库里已无对应记录）")
     p.add_argument("--yes", "-y", action="store_true", help="跳过二次确认")
+    # library sql 的选项
+    p.add_argument("--write", action="store_true",
+                   help="sql：允许写操作（默认只读，防手滑改坏）")
+    p.add_argument("--tables", action="store_true",
+                   help="sql：列出所有表与行数（不需要会 SQL）")
+    p.add_argument("--schema", action="store_true",
+                   help="sql：列出字段定义；可跟一个表名只看那张表")
     p.add_argument("--db", default=None, help="覆盖数据库文件路径（默认 data/image_metadata.db）")
 
 
@@ -307,6 +314,159 @@ def _confirm(question: str = "确认执行？") -> bool:
     return answer in ("y", "yes")
 
 
+# ──────────────────────────────────────────────
+#  library sql —— 直接查数据库
+# ──────────────────────────────────────────────
+
+# 只读模式下允许的语句开头（防止手滑改坏数据）
+_READ_ONLY_OK = ("select", "with", "explain", "pragma", "values")
+
+_SQL_CHEATSHEET = """可用表：
+  images   —— 图片记录（身份是 dhash，路径只是「最后已知位置」）
+  results  —— 每条搜索命中（引擎 / 相似度 / Pixiv ID / 画师 / 链接）
+  roots    —— 你登记的图库根路径
+  meta     —— 内部元信息（schema 版本）
+
+常用查询（直接照抄，把中文说明删掉即可）：
+  # 有哪些图片已经有出处了
+  SELECT i.dhash, r.pixiv_id, r.artist, ROUND(r.similarity,1) AS 相似度, i.abs_path
+  FROM results r JOIN images i ON i.id = r.image_id
+  WHERE r.pixiv_id IS NOT NULL ORDER BY r.similarity DESC;
+
+  # 按站点统计命中数
+  SELECT engine, COUNT(*) AS 条数, ROUND(AVG(similarity),1) AS 平均相似度
+  FROM results GROUP BY engine ORDER BY 条数 DESC;
+
+  # 按画师统计
+  SELECT artist, COUNT(*) AS 张数 FROM results
+  WHERE artist IS NOT NULL GROUP BY artist ORDER BY 张数 DESC LIMIT 20;
+
+  # 还没搜出结果的图片
+  SELECT dhash, abs_path FROM images
+  WHERE id NOT IN (SELECT image_id FROM results);
+
+  # 文件已不在原位置（被移动过）的记录
+  SELECT dhash, abs_path FROM images WHERE missing = 1;
+
+用法：
+  imgsearch library sql --tables          列出表与行数
+  imgsearch library sql --schema          列出字段定义
+  imgsearch library sql "SELECT ..."      执行查询（默认只读）
+  imgsearch library sql --write "UPDATE ..."   允许写操作
+"""
+
+
+def _display_width(text: str) -> int:
+    """
+    按终端显示宽度算长度：中文/日文是全角，占 2 列。
+
+    不然中文列会错位 —— 这类工具最容易让人一眼看出「没做细」。
+    """
+    import unicodedata
+    width = 0
+    for ch in str(text):
+        width += 2 if unicodedata.east_asian_width(ch) in ("W", "F") else 1
+    return width
+
+
+def _pad(text: str, width: int) -> str:
+    return str(text) + " " * max(0, width - _display_width(text))
+
+
+def _print_rows(columns, rows, limit: int = 200) -> None:
+    """打印成对齐的表格"""
+    if not columns:
+        print("（该语句没有返回结果集）")
+        return
+    if not rows:
+        print("（0 行）")
+        return
+
+    cells = [[("" if v is None else str(v)) for v in tuple(r)] for r in rows[:limit]]
+    widths = [max(_display_width(c), *( _display_width(r[i]) for r in cells ))
+              for i, c in enumerate(columns)]
+
+    print("  " + "  ".join(_pad(c, widths[i]) for i, c in enumerate(columns)))
+    print("  " + "  ".join("-" * widths[i] for i in range(len(columns))))
+    for r in cells:
+        print("  " + "  ".join(_pad(r[i], widths[i]) for i in range(len(columns))))
+    if len(rows) > limit:
+        print(f"  …（共 {len(rows)} 行，只显示前 {limit} 行；可用 LIMIT 收窄）")
+
+
+def _cmd_sql(args, store: LibraryStore, db: LibraryDB) -> None:
+    # ① --tables：列出表与行数
+    if args.tables:
+        names = [r["name"] for r in db.query(
+            "SELECT name FROM sqlite_master WHERE type='table'"
+            " AND name NOT LIKE 'sqlite_%' ORDER BY name")]
+        rows = [(n, db.scalar(f"SELECT COUNT(*) FROM {n}")) for n in names]
+        _print_rows(["表", "行数"], rows)
+        print("\n  💡 看字段：imgsearch library sql --schema <表名>")
+        print("     直接查：imgsearch library sql \"SELECT * FROM images LIMIT 5\"")
+        return
+
+    # ② --schema：列出字段定义
+    if args.schema:
+        target = (args.target or "").strip()
+        sql = ("SELECT name, sql FROM sqlite_master WHERE type='table'"
+               " AND name NOT LIKE 'sqlite_%'")
+        params = ()
+        if target:
+            sql += " AND name = ?"
+            params = (target,)
+        tables = db.query(sql + " ORDER BY name", params)
+        if not tables:
+            print(f"❌ 没有这张表：{target}")
+            return
+        for t in tables:
+            print(f"\n  【{t['name']}】")
+            for line in (t["sql"] or "").splitlines()[1:]:
+                line = line.strip().rstrip(",")
+                if line and not line.startswith(")"):
+                    print(f"    {line}")
+        return
+
+    # ③ 没给 SQL 也没给选项 → 速查
+    statement = (args.target or "").strip()
+    if not statement:
+        print(_SQL_CHEATSHEET)
+        return
+
+    readonly = not args.write
+    head = statement.lstrip("( 	").lower()
+    if readonly and not head.startswith(_READ_ONLY_OK):
+        print("❌ 默认只读：这条语句看起来会修改数据。")
+        print("   如果确实要改，加上 --write：")
+        print(f'     imgsearch library sql --write "{statement[:60]}..."')
+        sys.exit(1)
+
+    if ";" in statement.rstrip().rstrip(";"):
+        if readonly:
+            print("❌ 默认只读模式下只接受单条语句。")
+            sys.exit(1)
+        print("  ⚠️ 将按多语句执行（--write 已开启）")
+        with db.transaction():
+            db.conn.executescript(statement)
+        print("✅ 已执行")
+        return
+
+    if readonly:
+        # 双保险：即使语句被绕过筛查，SQLite 也拒绝写
+        db.conn.execute("PRAGMA query_only = ON")
+
+    try:
+        cur = db.conn.execute(statement)
+    except Exception as e:                                # noqa: BLE001
+        print(f"❌ SQL 执行失败：{type(e).__name__}: {e}")
+        sys.exit(1)
+
+    if cur.description:
+        _print_rows([d[0] for d in cur.description], cur.fetchall())
+    else:
+        print(f"✅ 已执行（影响 {cur.rowcount} 行）")
+
+
 def run(args, store: LibraryStore, db: LibraryDB) -> None:
     """执行 library 子命令（store/db 由 cli.py 传入，保证同一连接）"""
     handlers = {
@@ -319,5 +479,6 @@ def run(args, store: LibraryStore, db: LibraryDB) -> None:
         "clean": _cmd_clean,
         "forget": _cmd_forget,
         "refresh": _cmd_refresh,
+        "sql": _cmd_sql,
     }
     handlers[args.action](args, store, db)

@@ -165,6 +165,43 @@ SAUCENAO_KEY=xxx ./run.sh search 图片.jpg
   `VACUUM` 的产物又先落在 `-wal` 里 —— 不 checkpoint 的话磁盘占用**看起来不降反升**。
   这就是「清了半天发现文件没变小」的根因。实测 20000 条记录：**15.4 MB → 56 KB**。
 
+### 直接查数据库
+
+底库就是**一个 SQLite 文件**（`data/image_metadata.db`，WAL 模式）。
+不需要装任何东西 —— Python 自带 SQLite：
+
+```bash
+./run.sh library sql --tables              # 列出表与行数（不用会 SQL）
+./run.sh library sql --schema              # 列出字段定义
+./run.sh library sql --schema images       # 只看某张表
+./run.sh library sql                        # 打印速查表 + 可直接照抄的示例查询
+./run.sh library sql "SELECT dhash, abs_path FROM images LIMIT 5"
+./run.sh library sql --write "UPDATE ..."  # 默认只读，要改得显式加 --write
+```
+
+默认**只读**（两道护栏：语句筛查 + `PRAGMA query_only`），目的是防手滑而非安全边界。
+输出是列对齐的表格，中文按全角宽度计算，不会错位。
+
+> 不用系统装的 `sqlite3`（Debian 上要 apt）。若想用那个交互 shell：
+> `sudo apt install sqlite3`，然后 `sqlite3 data/image_metadata.db .tables`。
+
+表结构：
+
+```
+roots   (id, path, label, added_at, enabled)          你手动登记的根路径
+images  (id, dhash, width, height, size, mtime,       dhash = 身份；路径只是
+         root_id→roots, abs_path, rel_path,              「最后已知位置」
+         first_seen, last_seen, missing)
+results (id, image_id→images, engine, similarity,      一条命中；删图会级联删结果
+         pixiv_id, pixiv_page, artist, artist_id,
+         title, material, ext_urls, highres_url,
+         thumbnail, danbooru_id, gelbooru_id,
+         twitter_id, extra_ids, detail, fetched_at)
+meta    (key, value)                                   内部元信息
+```
+
+规模参考：约 **790 字节/图**（含多条结果），4000 张 ≈ 5 MB，10 万张 ≈ 120 MB。
+
 ### 判重档位
 
 匹配结果会如实告知，不把「相似」当成「同一张」：
@@ -272,7 +309,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（352 项）
+├── tests/                     ← pytest（383 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏

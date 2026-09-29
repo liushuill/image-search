@@ -101,12 +101,20 @@ class LibraryDB:
     def __init__(self, path: Optional[Path] = None):
         self.path = Path(path) if path else Path(DB_PATH)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path))
+        # timeout：GUI 与 CLI 可能同时写，靠它等待而不是立刻抛 database is locked
+        self.conn = sqlite3.connect(str(self.path), timeout=10.0)
         self.conn.row_factory = sqlite3.Row
         # 外键必须显式打开：删 root / image 时的级联行为依赖它
         self.conn.execute("PRAGMA foreign_keys = ON")
         # WAL：允许「一边搜索写入、一边界面读取」
         self.conn.execute("PRAGMA journal_mode = WAL")
+        # WAL 下 synchronous=NORMAL 是官方推荐：写入快很多，
+        # 且应用崩溃不丢数据（只有整机断电才可能丢最后几笔事务）
+        self.conn.execute("PRAGMA synchronous = NORMAL")
+        self.conn.execute("PRAGMA busy_timeout = 10000")
+        # 临时表放内存、缓存放大到约 16MB：批量搜索时明显受益
+        self.conn.execute("PRAGMA temp_store = MEMORY")
+        self.conn.execute("PRAGMA cache_size = -16000")
         self._init_schema()
 
     # ── 生命周期 ────────────────────────────────
