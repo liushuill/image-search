@@ -42,10 +42,16 @@ class Danbooru(SearchEngine):
             # 现在是独立字段，且有 .env 回退。
             Field("api_key", "API Key", "secret", "",
                   help="留空时从 .env 的 DANBOORU_API_KEY 读取",
-                  env_var="DANBOORU_API_KEY"),
-            Field("login", "用户名", "str", "",
-                  help="Danbooru 账号名；留空回退到 .env 的 DANBOORU_LOGIN",
-                  env_var="DANBOORU_LOGIN", required=True,
+                  # 引擎在缺这个值时直接报错，因此界面上必须标成必填 ——
+                  # 否则用户看到「可选」跳过去，然后撞上运行时报错。
+                  required=True, env_var="DANBOORU_API_KEY"),
+            # 类型是 secret：存 .env、只在「凭据」页编辑 ——
+            # 否则引擎页和凭据页都能改却不互通（之前就是这个 bug）。
+            # 但 mask=False：用户名打码后没法核对自己有没有打错。
+            Field("login", "用户名", "secret", "",
+                  help="Danbooru 账号名（不是邮箱）。"
+                       "注：IQDB 引擎无需账号也能查 Danbooru 的帖子",
+                  env_var="DANBOORU_LOGIN", required=True, mask=False,
                   placeholder="your_username"),
         ),
     )

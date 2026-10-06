@@ -22,22 +22,13 @@ from imgsearch.service import declared_secrets
 from imgsearch_gui import style
 
 # 已知凭据的友好文案与获取入口（其余由引擎 schema 的 help 兜底）
-DISPLAY = {
-    "SAUCENAO_KEY": (
-        "SauceNAO API Key",
-        "SauceNAO 是 Pixiv 覆盖最好的引擎，必填。免费注册后在账号页获取。",
-        "https://saucenao.com/user.php?page=account",
-    ),
-    "DANBOORU_LOGIN": (
-        "Danbooru 用户名",
-        "Danbooru 引擎需要账号。注意 IQDB 引擎无需账号也能查 Danbooru 的帖子。",
-        "https://danbooru.donmai.us/profile",
-    ),
-    "DANBOORU_API_KEY": (
-        "Danbooru API Key",
-        "在 Danbooru 个人资料页可以找到。",
-        "https://danbooru.donmai.us/profile",
-    ),
+# ⚠️ 这里**只放界面专属的信息**（获取地址）——名称、说明、是否必填
+# 一律来自引擎 schema（见 service.declared_secrets）。
+# 同一个事实写两处会立刻分叉：之前就出现过凭据页显示「可选」
+# 而引擎 required=True 的情况，用户照着跳过然后撞报错。
+LINKS = {
+    "SAUCENAO_KEY": "https://saucenao.com/user.php?page=account",
+    "DANBOORU_API_KEY": "https://danbooru.donmai.us/profile",
 }
 
 
@@ -46,16 +37,16 @@ class CredentialRow(QtWidgets.QFrame):
 
     changed = QtCore.Signal()
 
-    def __init__(self, name: str, fallback_title: str = "",
-                 fallback_desc: str = "", parent=None):
+    def __init__(self, name: str, title: str = "", desc: str = "",
+                 required: bool = False, mask: bool = True, parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
         self.name = name
-
-        # 已知凭据用友好文案；否则用引擎 schema 给的名字与 help
-        title, desc, link = DISPLAY.get(
-            name, (fallback_title or name, fallback_desc, "")
-        )
+        # mask=False 的值（如用户名）明文显示 —— 打码后没法核对有没有打错
+        self.mask = mask
+        # 名称与说明来自引擎 schema；链接是界面专属信息
+        title = title or name
+        link = LINKS.get(name, "")
         self.title = title
 
         lay = QtWidgets.QVBoxLayout(self)
@@ -66,6 +57,14 @@ class CredentialRow(QtWidgets.QFrame):
         lbl = QtWidgets.QLabel(title)
         lbl.setObjectName("SectionTitle")
         head.addWidget(lbl)
+
+        # 必填与否必须看得见 —— 否则用户会跳过必填项然后撞上运行时报错
+        badge = QtWidgets.QLabel("必填" if required else "可选")
+        badge.setObjectName("FieldHelp")
+        badge.setStyleSheet(
+            f"color:{style.WARN if required else style.MUTED};"
+        )
+        head.addWidget(badge)
 
         env_lbl = QtWidgets.QLabel(f"（.env 变量名：{name}）")
         env_lbl.setObjectName("FieldHelp")
@@ -82,6 +81,13 @@ class CredentialRow(QtWidgets.QFrame):
             d.setObjectName("FieldHelp")
             d.setWordWrap(True)
             lay.addWidget(d)
+
+        if link:
+            a = QtWidgets.QLabel(f'<a href="{link}">获取地址：{link}</a>')
+            a.setObjectName("FieldHelp")
+            a.setOpenExternalLinks(True)
+            a.setWordWrap(True)
+            lay.addWidget(a)
 
         row = QtWidgets.QHBoxLayout()
         row.setSpacing(8)
@@ -133,7 +139,9 @@ class CredentialRow(QtWidgets.QFrame):
     def refresh_status(self) -> None:
         source = self.current_source()
         if secrets.is_set(self.name):
-            self.status.setText(f"　✅ 已设置（{source}）：{secrets.masked(self.name)}")
+            shown = secrets.masked(self.name) if self.mask \
+                else (secrets.get(self.name) or "")
+            self.status.setText(f"　✅ 已设置（{source}）：{shown}")
             self.status.setStyleSheet(f"color:{style.OK};")
         else:
             self.status.setText("　✗ 未设置")
@@ -230,7 +238,7 @@ class CredentialsPage(QtWidgets.QWidget):
         """
         secrets.invalidate_cache()
         specs = declared_secrets()
-        wanted = [env for env, _, _ in specs]
+        wanted = [c.env_name for c in specs]
         if wanted == list(self.rows.keys()):
             self.reload()
             return
@@ -242,10 +250,12 @@ class CredentialsPage(QtWidgets.QWidget):
                 w.setParent(None)
                 w.deleteLater()
         self.rows = {}
-        for env_name, title, desc in specs:
-            row = CredentialRow(env_name, fallback_title=title, fallback_desc=desc)
+        for spec in specs:
+            row = CredentialRow(spec.env_name, title=spec.title,
+                                desc=spec.description,
+                                required=spec.required, mask=spec.mask)
             row.changed.connect(self._update_save_state)
-            self.rows[env_name] = row
+            self.rows[spec.env_name] = row
             self.rows_layout.addWidget(row)
         self.reload()
 

@@ -190,12 +190,59 @@ class TestDeclaredSecrets:
     def test_contains_known_and_uniqueness(self):
         from imgsearch.service import declared_secrets
         specs = declared_secrets()
-        names = [n for n, _, _ in specs]
+        names = [c.env_name for c in specs]
         assert "SAUCENAO_KEY" in names
         assert len(names) == len(set(names)), "清单里有重复项"
 
     def test_titles_are_human_readable(self):
         from imgsearch.service import declared_secrets
-        for name, title, desc in declared_secrets():
-            assert title and name
-            assert title != "None"
+        for spec in declared_secrets():
+            assert spec.title and spec.env_name
+            assert spec.title != "None"
+            assert isinstance(spec.required, bool)
+            assert isinstance(spec.mask, bool)
+
+    def test_schema_is_authoritative_over_known_list(self):
+        """
+        回归：同一个凭据两处都有描述时，必须用引擎 schema 那份。
+        之前反过来（KNOWN_SECRETS 优先），于是凭据页显示旧文案「可选」，
+        而引擎其实 required=True —— 用户照着跳过，然后撞报错。
+        """
+        from imgsearch.service import declared_secrets
+        specs = {c.env_name: c for c in declared_secrets()}
+        key = specs["DANBOORU_API_KEY"]
+        assert "Danbooru" in key.title        # 来自引擎 schema 的展示名
+        assert key.required is True           # 与运行时的强制一致
+
+    def test_required_matches_runtime_enforcement(self):
+        """界面标注的必填必须与代码真正强制的集合一致"""
+        import pytest as _pytest
+        from imgsearch.engines.danbooru import Danbooru
+        from imgsearch.engines.saucenao import SauceNAO
+        from imgsearch.service import declared_secrets
+
+        required = {c.env_name for c in declared_secrets() if c.required}
+        assert "SAUCENAO_KEY" in required
+        assert "DANBOORU_API_KEY" in required
+        # 这两个引擎缺 key 时确实会报错
+        with _pytest.raises(ValueError, match="API Key 未配置"):
+            SauceNAO(api_key="")
+        with _pytest.raises(ValueError, match="API Key 未配置"):
+            Danbooru(login="someone", api_key="")
+
+    def test_username_row_is_unmasked(self):
+        """
+        用户名与 API Key 并排在凭据页（一处填完），但**不打码**。
+
+        两处都能改又不互通是之前那个 bug；而全打码会让用户
+        没法核对自己有没有把账号名打错 —— 两件事要分开表达。
+        """
+        from imgsearch.service import declared_secrets
+        specs = {c.env_name: c for c in declared_secrets()}
+        assert "DANBOORU_LOGIN" in specs
+        # 它是 secret（只在凭据页编辑，避免两个入口不互通）……
+        assert specs["DANBOORU_LOGIN"].required is True
+        # ……但不打码：用户名隐藏了没法核对有没有打错
+        assert specs["DANBOORU_LOGIN"].mask is False
+        # 而真正的密钥仍然打码
+        assert specs["DANBOORU_API_KEY"].mask is True

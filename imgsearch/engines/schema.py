@@ -43,6 +43,12 @@ class Field:
     default: Any = ""
     help: str = ""
     required: bool = False
+    # 仅对 type="secret" 有意义：是否在界面上打码显示。
+    # 为什么需要它：secret 表达的是「这份值存 .env、只在凭据页编辑」，
+    # 而用户名这类值虽然也存 .env，却**没有隐藏的必要**（打码后
+    # 用户没法核对自己有没有打错）。把两件事分开，就不必为了"能看"
+    # 而把它挪回引擎页、造成两个编辑入口。
+    mask: bool = True
     env_var: str = ""            # 值为空时从此环境变量 / .env 回退读取
     minimum: Optional[float] = None
     maximum: Optional[float] = None

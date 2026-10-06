@@ -69,8 +69,11 @@ class SauceNAO(SearchEngine):
                   minimum=0),
             # 凭据只存 .env；界面上的值由「凭据」页维护
             Field("api_key", "API Key", "secret", "",
-                  help="留空时从 .env 的 SAUCENAO_KEY 读取",
-                  env_var="SAUCENAO_KEY"),
+                  help="Pixiv 覆盖最好的引擎。到账号页免费注册后获取 Key；"
+                       "也可留空并从 .env 的 SAUCENAO_KEY 读取",
+                  # 引擎在缺这个值时直接报错，因此界面上必须标成必填 ——
+                  # 否则用户看到「可选」跳过去，然后撞上运行时报错。
+                  required=True, env_var="SAUCENAO_KEY"),
             Field("numres", "返回结果数", INT, 5,
                   help="让 SauceNAO 最多返回多少条结果", minimum=1, maximum=50,
                   advanced=True),

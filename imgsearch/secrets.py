@@ -25,10 +25,14 @@ PROJECT_DIR = Path(__file__).resolve().parent.parent
 ENV_FILE = PROJECT_DIR / ".env"
 
 # 已知凭据 → 用途说明（供 CLI 展示与校验）
+# 已知凭据的**兜底说明**。真正权威的来源是各引擎 schema 里的 secret 字段
+# （它有展示名、说明、是否必填），这里只保证「引擎不可用时仍能在界面上列出来」。
+#
+# ⚠️ 只放**真正的密钥**。用户名之类的非密钥不要在列在这里 ——
+# 它不是 secret，引擎页已有专属字段；两处都能改又不互通，正是之前那个 bug。
 KNOWN_SECRETS: Dict[str, str] = {
     "SAUCENAO_KEY": "SauceNAO API Key（https://saucenao.com/user.php?page=account）",
-    "DANBOORU_LOGIN": "Danbooru 用户名（可选，有账号可提高速率限制）",
-    "DANBOORU_API_KEY": "Danbooru API Key（可选，/profile → API Key）",
+    "DANBOORU_API_KEY": "Danbooru API Key（/profile → Generate API key）",
 }
 
 # 运行时缓存：None 表示尚未加载

@@ -10,7 +10,7 @@ GUI 通过 stdout 桥接转成信号（见 ``imgsearch_gui.workers``）。
 """
 
 from dataclasses import dataclass, field
-from typing import Callable, List, Optional
+from typing import Callable, List, Optional, Dict
 
 from imgsearch import secrets
 from imgsearch.config import get
@@ -34,47 +34,69 @@ class SearchOutcome:
         return bool(self.results)
 
 
-def declared_secrets() -> List[tuple]:
+@dataclass(frozen=True)
+class CredentialSpec:
     """
-    所有需要填写的凭据：``[(环境变量名, 展示名, 说明), ...]``
+    一条待填写的凭据。
 
-    来源 = ``secrets.KNOWN_SECRETS`` ∪ 各引擎 schema 里声明的 SECRET 字段。
-    这样**自定义引擎新增的凭据也会自动出现在「凭据」页**，
-    不必回来改界面或这份列表。
-
-    这里是凭据的唯一定义处：引擎页只读、凭据页负责写入 .env。
+    用 dataclass 而不是元组：这个形状已经改过两次（先是三元组，
+    后来加 required），元组每加一个字段就要改所有解包处。
     """
-    from imgsearch.engines.schema import env_var_for
+
+    env_name: str
+    title: str
+    description: str = ""
+    required: bool = False
+    mask: bool = True
+
+
+def declared_secrets() -> List[CredentialSpec]:
+    """
+    所有需要填写的凭据。
+
+    **引擎 schema 是唯一权威来源**：展示名、说明、是否必填、是否打码都来自它。
+    ``secrets.KNOWN_SECRETS`` 只作兜底 —— 引擎不可用时仍能在界面上列出来。
+
+    ⚠️ 优先级方向很关键。反过来（KNOWN_SECRETS 优先）会出这种问题：
+    同一份凭据两处都有描述，界面显示了旧那份「可选」，
+    而引擎其实 required=True —— 用户照着跳过，然后撞上运行时报错。
+    """
     from imgsearch.engines.store import get_store
 
-    known = dict(secrets.KNOWN_SECRETS)
-    out: List[tuple] = []
-    seen = set()
+    declared: Dict[str, CredentialSpec] = {}
 
-    for env_name, desc in known.items():
-        out.append((env_name, env_name, desc))
-        seen.add(env_name)
+    # ① 已知清单兜底（不知是否必填，先按可选）
+    for env_name, desc in secrets.KNOWN_SECRETS.items():
+        declared[env_name] = CredentialSpec(
+            env_name=env_name, title=env_name, description=desc)
 
+    # ② 引擎 schema 覆盖它（信息更具体）
     try:
         store = get_store()
     except Exception:                                     # noqa: BLE001
-        return out
+        store = None
 
-    for ec in store.list_all():
-        try:
-            schema = ec.schema()
-        except Exception:                                 # noqa: BLE001
-            continue
-        for f in schema:
-            if not f.is_secret:
+    if store is not None:
+        from imgsearch.engines.schema import env_var_for
+
+        for ec in store.list_all():
+            try:
+                schema = ec.schema()
+            except Exception:                             # noqa: BLE001
                 continue
-            env_name = env_var_for(ec.name, f)
-            if env_name in seen:
-                continue
-            seen.add(env_name)
-            out.append((env_name, f"{ec.display_name} · {f.label}",
-                        f.help or f"由引擎「{ec.display_name}」使用"))
-    return out
+            for f in schema:
+                if not f.is_secret:
+                    continue
+                env_name = env_var_for(ec.name, f)
+                declared[env_name] = CredentialSpec(
+                    env_name=env_name,
+                    title=f"{ec.display_name} · {f.label}",
+                    description=f.help or f"由引擎「{ec.display_name}」使用",
+                    required=bool(getattr(f, "required", False)),
+                    mask=bool(getattr(f, "mask", True)),
+                )
+
+    return list(declared.values())
 
 
 def open_library(enabled: Optional[bool] = None):

@@ -256,15 +256,37 @@ class TestCredentialsPage:
         from imgsearch.service import declared_secrets
         from imgsearch_gui.pages.credentials_page import CredentialsPage
         page = CredentialsPage()
-        expected = [env for env, _, _ in declared_secrets()]
+        expected = [c.env_name for c in declared_secrets()]
         assert list(page.rows.keys()) == expected
         assert "SAUCENAO_KEY" in page.rows
 
-    def test_friendly_titles_for_known_secrets(self, qapp):
+    def test_titles_come_from_engine_schema(self, qapp):
+        """
+        标题由**引擎 schema** 提供（不是界面里另写一份）——
+        界面只补「去哪里获取」的链接。同一个事实写两处必然分叉。
+        """
         from imgsearch_gui.pages.credentials_page import CredentialsPage
         page = CredentialsPage()
-        assert page.rows["SAUCENAO_KEY"].title == "SauceNAO API Key"
-        assert page.rows["DANBOORU_API_KEY"].title == "Danbooru API Key"
+        sauce = page.rows["SAUCENAO_KEY"].title
+        assert "SauceNAO" in sauce and "API Key" in sauce
+        assert "Danbooru" in page.rows["DANBOORU_API_KEY"].title
+
+    def test_shows_required_badge(self, qapp):
+        """必填与否必须看得见，否则用户会跳过必填项然后撞报错"""
+        from PySide6 import QtWidgets
+        from imgsearch_gui.pages.credentials_page import CredentialsPage
+        page = CredentialsPage()
+        row = page.rows["SAUCENAO_KEY"]
+        labels = [w.text() for w in row.findChildren(QtWidgets.QLabel)]
+        assert "必填" in labels
+
+    def test_username_row_is_unmasked(self, qapp):
+        """用户名与 Key 并排在一处，但不打码（打码后没法核对有没有打错）"""
+        from imgsearch_gui.pages.credentials_page import CredentialsPage
+        page = CredentialsPage()
+        assert "DANBOORU_LOGIN" in page.rows
+        assert page.rows["DANBOORU_LOGIN"].mask is False
+        assert page.rows["DANBOORU_API_KEY"].mask is True
 
     def test_saving_writes_only_env(self, qapp):
         import imgsearch.config as cfg
