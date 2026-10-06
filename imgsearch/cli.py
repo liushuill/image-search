@@ -1213,6 +1213,12 @@ def _print_engine_list(store: EngineStore) -> None:
 
 def _engine_note(e: EngineConfig) -> str:
     """一行备注：把「为什么不能用」直接摆出来，而不是等搜索时才报错"""
+    cls = resolve_engine_class(e)
+    usage = (getattr(cls, "USAGE_NOTE", "") or "") if cls is not None else ""
+    if not e.enabled and usage:
+        # 停用的引擎也给提示 —— 想启用的人需要先知道前提条件
+        first = usage.split("。", 1)[0]
+        return f"ℹ️ {first}。"
     if resolve_engine_class(e) is None:
         if not e.is_builtin and not (e.module_path and e.class_name):
             return "⚠️ 未绑定模块（--module/--class）"

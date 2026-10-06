@@ -106,6 +106,12 @@ class EnginesPage(QtWidgets.QWidget):
         self.detail_meta.setWordWrap(True)
         rl.addWidget(self.detail_meta)
 
+        self.usage_label = QtWidgets.QLabel()
+        self.usage_label.setObjectName("FieldHelp")
+        self.usage_label.setWordWrap(True)
+        self.usage_label.setVisible(False)
+        rl.addWidget(self.usage_label)
+
         self.scroll = QtWidgets.QScrollArea()
         self.scroll.setWidgetResizable(True)
         self.scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
@@ -285,6 +291,8 @@ class EnginesPage(QtWidgets.QWidget):
         self._current = ""
         self.detail_head.setText("没有可配置的引擎")
         self.detail_meta.setText("")
+        self.usage_label.setText("")
+        self.usage_label.setVisible(False)
         self._set_form(None)
         self.save_btn.setEnabled(False)
         self.test_btn.setEnabled(False)
@@ -323,6 +331,11 @@ class EnginesPage(QtWidgets.QWidget):
         if cls is None:
             bits.append("⚠️ 引擎类当前无法解析，下列为已保存的值")
         self.detail_meta.setText("　·　".join(bits))
+
+        # 使用须知单独一行：它通常较长，混在「·」分隔的一行里会读不动
+        usage = (getattr(cls, "USAGE_NOTE", "") or "") if cls is not None else ""
+        self.usage_label.setText(f"ℹ️ {usage}" if usage else "")
+        self.usage_label.setVisible(bool(usage))
 
         form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
         form.changed.connect(self._mark_dirty)

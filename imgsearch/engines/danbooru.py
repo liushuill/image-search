@@ -35,6 +35,15 @@ class Danbooru(SearchEngine):
     # 需要账号才能用，默认不启用，避免开箱即报错
     ENABLED_BY_DEFAULT = False
 
+    # 默认停用：它的以图搜图端点要求一把**未受限**的 API Key，门槛比别的引擎高。
+    # 代码保留着 —— 有满足条件账号的人启用即可（见 USAGE_NOTE）。
+    USAGE_NOTE = (
+        "需要未受限的 API Key：Danbooru 会校验 Key 的 IP 允许列表与端点权限列表"
+        "（默认都为空=不限制），任一被填过就必须匹配，否则所有端点都 403。"
+        "走代理时出口 IP 随节点变化，填死 IP 很容易失效。"
+        "不想折腾账号就用 IQDB 引擎 —— 它同样会搜 Danbooru 的帖子。"
+    )
+
     CONFIG_SCHEMA = COMMON_SCHEMA.extend(
         Schema(
             # 原本要求用户去「自定义查询参数」里手填 login，隐蔽且易错。

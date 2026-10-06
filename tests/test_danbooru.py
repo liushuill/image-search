@@ -228,3 +228,114 @@ class TestPermissionVersusAuthErrors:
         with pytest.raises(ConnectionError) as ei:
             eng.search_by_url("https://example.com/x.jpg")
         assert "Access denied" in str(ei.value)
+
+
+class TestUsageNote:
+    """
+    停用这个引擎是为了「有账号的人可以启用」，所以**前提条件必须看得见** ——
+    否则下一个人启用后照样撞 403，又要重走一遍我走过的弯路。
+    """
+
+    def test_danbooru_is_disabled_by_default(self):
+        """新装环境不该默认启用它：门槛比别的引擎高"""
+        from imgsearch.engines.danbooru import Danbooru
+        assert Danbooru.ENABLED_BY_DEFAULT is False
+
+    def test_declares_a_usage_note(self):
+        from imgsearch.engines.danbooru import Danbooru
+        note = Danbooru.USAGE_NOTE
+        assert note
+        assert "API Key" in note
+        assert "IP" in note and "权限" in note
+        # 要指出「两个列表默认为空=不限制」这个关键语义
+        assert "空" in note
+        # 要给出不需要账号的替代方案
+        assert "IQDB" in note
+
+    def test_other_engines_have_no_note(self):
+        """没有前提条件的引擎不该显示须知，免得噪声"""
+        from imgsearch.engines.base import SearchEngine
+        from imgsearch.engines.iqdb import Iqdb
+        assert SearchEngine.USAGE_NOTE == ""
+        assert Iqdb.USAGE_NOTE == ""
+
+    def test_cli_note_shows_for_disabled_engine(self):
+        """停用的引擎也要给提示 —— 想启用的人需要先知道前提条件"""
+        from imgsearch.cli import _engine_note
+        from imgsearch.engines.store import get_store
+        ec = get_store().get("danbooru")
+        note = _engine_note(ec)
+        assert note.startswith("ℹ️")
+        assert "API Key" in note
+
+    def test_cli_note_empty_for_engines_without_note_when_disabled(self):
+        from imgsearch.cli import _engine_note
+        from imgsearch.engines.store import get_store
+        ec = get_store().get("iqdb")
+        if not ec.enabled:
+            assert _engine_note(ec) == ""
+        else:
+            assert "ℹ️" not in _engine_note(ec)
+
+    def test_missing_credentials_still_wins_over_usage_note(self):
+        """真缺凭据时，「缺 XX」比使用须知更该优先显示"""
+        from imgsearch.cli import _engine_note
+        from imgsearch.engines.store import get_store
+        ec = get_store().get("danbooru")
+        # 临时清掉凭据环境变量，模拟未填写
+        import imgsearch.secrets as sec
+        saved = dict(sec._cache) if sec._cache else None
+        try:
+            sec._cache = {}
+            import os
+            for k in ("DANBOORU_LOGIN", "DANBOORU_API_KEY"):
+                os.environ.pop(k, None)
+            ec.settings.pop("login", None)
+            note = _engine_note(ec)
+            assert note  # 至少要有提示
+        finally:
+            sec._cache = saved
+            sec.invalidate_cache()
+
+
+class TestGuiUsageNote:
+    """GUI 里须知要单独一行显示（它较长，混在「·」分隔的行里读不动）"""
+
+    @staticmethod
+    def _select(page, name: str) -> None:
+        """按配置名选中某个引擎"""
+        page._load_detail(name)
+
+    # ⚠️ 用 isHidden() 而不是 isVisible()：后者在父窗口未 show 时恒为 False，
+    # 测不出「自己有没有被显式隐藏」。
+    def test_label_shows_note_for_danbooru(self, qapp):
+        from imgsearch_gui.pages.engines_page import EnginesPage
+        page = EnginesPage()
+        self._select(page, "danbooru")
+        assert "API Key" in page.usage_label.text()
+        assert page.usage_label.isHidden() is False
+
+    def test_label_hidden_for_iqdb(self, qapp):
+        from imgsearch_gui.pages.engines_page import EnginesPage
+        page = EnginesPage()
+        self._select(page, "iqdb")
+        assert page.usage_label.text() == ""
+        assert page.usage_label.isHidden() is True
+
+    def test_cleared_when_leaving(self, qapp):
+        from imgsearch_gui.pages.engines_page import EnginesPage
+        page = EnginesPage()
+        self._select(page, "danbooru")
+        assert page.usage_label.text()
+        page._clear_detail()
+        assert page.usage_label.text() == ""
+        assert page.usage_label.isHidden() is True
+
+    def test_note_survives_being_disabled(self, qapp):
+        """停用时更要显示 —— 想启用的人需要先知道前提条件"""
+        from imgsearch.engines.store import get_store
+        from imgsearch_gui.pages.engines_page import EnginesPage
+        get_store().set_enabled("danbooru", False)
+        page = EnginesPage()
+        self._select(page, "danbooru")
+        assert "API Key" in page.usage_label.text()

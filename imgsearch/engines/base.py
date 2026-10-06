@@ -319,6 +319,11 @@ class SearchEngine:
         """引擎名称（优先用注册名，便于配置与日志一致）"""
         return self.NAME or self.__class__.__name__
 
+    # 使用须知：启用这个引擎前需要满足的前提条件。
+    # 会在 `engines list` 的备注列、`engines show` 与 GUI 引擎页显示 ——
+    # 目的是让「为什么用不了」在启用之前就看得见，而不是等搜索时撞报错。
+    USAGE_NOTE = ""
+
     @classmethod
     def describe(cls) -> str:
         """单行描述，供引擎列表展示"""

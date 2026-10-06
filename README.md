@@ -256,6 +256,45 @@ meta    (key, value)                                   内部元信息
 
 ---
 
+## 关于 Danbooru 引擎（默认停用）
+
+**默认停用，代码保留** —— 门槛比别的引擎高，但有满足条件的账号时可用。
+
+它的以图搜图端点 `POST /iqdb_queries.json` 会校验**这把 API Key 自身**的
+两个列表（依据 [Danbooru 源码](https://github.com/danbooru/danbooru)）：
+
+```
+app/logical/session_loader.rb:238
+    raise User::PrivilegeError if !api_key.has_permission?(...)
+
+app/models/api_key.rb
+    has_permission?(ip, controller, action) = ip_permitted? && action_permitted?
+    ip_permitted?     -> true if permitted_ip_addresses.empty?   # 空 = 不限制
+    action_permitted? -> true if permissions.empty?              # 空 = 不限制
+```
+
+即 Key 上那两个**可选**字段（**IP Addresses** / **Permissions**）一旦填过，
+就必须匹配，否则**所有端点**都返回 403。走代理时出口 IP 随节点变化，
+填死 IP 很容易失效。
+
+**启用前请确认**：到 <https://danbooru.danmai.us/api_keys> 把你的 Key 的
+**IP Addresses 与 Permissions 两个字段清空**。
+
+要判断是不是这个问题，看错误码即可：
+
+| 现象 | 含义 |
+|---|---|
+| `401 Invalid API key` | 凭据本身不对 |
+| `403 PrivilegeError`（所有端点都 403） | 凭据正确，但 Key 被限制了 |
+| `403` + CSRF 字样 | 请求未被认可为已认证（多为 User-Agent 伪装） |
+
+> 顺带说明：**匿名 GET `/iqdb_queries.json?url=…` 是可用的**（实测返回 20 条匹配），
+> 但本地文件走的是 POST 上传，仍然需要一把可用的 Key。所以**没有账号就直接用
+> IQDB 引擎** —— 它同样会搜 Danbooru 的帖子。
+
+引擎在 `engines list` 的备注列与 GUI 引擎页都会显示这条「使用须知」，
+不必等搜索失败才知道前提条件。
+
 ## 批量识别
 
 把一整本"待查"目录逐个识别出来，结果写入图库。
@@ -446,7 +485,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（582 项）
+├── tests/                     ← pytest（614 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -552,7 +591,7 @@ image-search/
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **582 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **614 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -566,7 +605,7 @@ image-search/
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **582 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **614 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象
