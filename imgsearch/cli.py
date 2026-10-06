@@ -48,15 +48,20 @@ def _force_utf8(stream):
     直接访问会在 **import 期**就抛 AttributeError ——
     而 imgsearch.cli 是被惰性导入的，症状表现为「搜索时报一个和编码毫无关系的错」。
     """
-    if getattr(stream, "encoding", "").upper() == "UTF-8":
+    # ⚠️ 必须用 `or ""`：io.StringIO **有** encoding 属性但值是 None，
+    # 而 getattr 的默认值只在属性缺失时生效 —— 于是拿到 None，
+    # None.upper() 直接崩。这正是批量识别前 84 张全挂的原因。
+    if (getattr(stream, "encoding", None) or "").upper() in ("UTF-8", "UTF8"):
         return stream
     if not hasattr(stream, "buffer"):
         return stream
     return io.TextIOWrapper(stream.buffer, encoding="utf-8", errors="replace")
 
 
-sys.stdout = _force_utf8(sys.stdout)
-sys.stderr = _force_utf8(sys.stderr)
+# ⚠️ 这里**刻意不做** sys.stdout/stderr 的包装（原先是在模块级做的）。
+# 模块级副作用会让「导入」这件事的结果取决于此刻的 stdout 是谁 ——
+# GUI 批量在 redirect_stdout(StringIO) 里惰性导入本模块，就踩了这个坑。
+# 现在改为只在 main() 里包装：只有 CLI 真正驱动时才动全局流。
 
 import argparse
 import json
@@ -509,6 +514,12 @@ def print_results(results: List):
 
 
 def main():
+    # 只在真正从命令行运行时才把标准流包成 UTF-8。
+    # 刻意不放在模块级 —— 那会让「导入本模块」的结果取决于此刻 stdout 是谁，
+    # GUI 批量在 redirect_stdout(StringIO) 下惰性导入时就踩了这个坑。
+    sys.stdout = _force_utf8(sys.stdout)
+    sys.stderr = _force_utf8(sys.stderr)
+
     parser = argparse.ArgumentParser(
         prog="imgsearch",
         description="🎨 二次元图片溯源工具 - 查找图片来源",

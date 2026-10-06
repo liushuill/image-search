@@ -25,7 +25,7 @@
         "db": 999,
         "numres": 5,
         "proxy_mode": "auto",
-        "min_similarity": 70
+        "min_similarity": 90
       }
     },
     {

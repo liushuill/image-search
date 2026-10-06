@@ -314,6 +314,12 @@ def run_batch(directory, *, recursive: bool = True,
 
     report = BatchReport(directory=str(directory), total=len(paths))
 
+    # 先把惰性导入做完，再进入 redirect_stdout —— 否则首次导入发生在
+    # 被重定向的 stdout 之下，任何依赖「当前 stdout 是谁」的模块级代码
+    # 都会以奇怪的方式失败（见 cli._force_utf8 的注释）。
+    import imgsearch.cli
+    imgsearch.cli.search_image          # 触发模块完成导入（属性访问即用途）
+
     # 逐张节流：短期限额（如 SauceNAO 的 4 次/30 秒）是服务端判定的，
     # 连续猛打会在第 5 张就被 429，然后被 auto 循环**静默降级**到弱引擎。
     # 按主引擎声明的间隔放慢，就能让主引擎真的被每一张用到。
