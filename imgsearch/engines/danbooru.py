@@ -172,11 +172,29 @@ class Danbooru(SearchEngine):
                     "  两者都在「凭据」页填写。"
                 ) from e
             if status == 403:
+                body = ""
+                if getattr(e, "response", None) is not None:
+                    body = (e.response.text or "")[:200]
+                # 两种 403 的成因完全不同，必须分开说 ——
+                # 凭据有效但等级不够时是「Access denied」，
+                # 而 UA 被判定为伪装/未认证时是 CSRF 那条。
+                if "Access denied" in body:
+                    raise ConnectionError(
+                        "Danbooru 拒绝访问（403 Access denied）："
+                        "**凭据是对的，但账号等级不够**。\n"
+                        "  · 以图搜图（/iqdb_queries）不对普通 Member 账号开放，"
+                        "需要 Gold 及以上（付费）\n"
+                        "  · 替代方案：用 **IQDB 引擎** —— 它不需要任何账号"
+                        "就能查 Danbooru 的帖子，覆盖率略低\n"
+                        f"  Danbooru 原话：{body or '（无响应体）'}"
+                    ) from e
                 raise ConnectionError(
-                    "Danbooru 拒绝了请求（403）。\n"
-                    "  常见原因：User-Agent 被判为伪装浏览器"
-                    "（可在引擎页「自定义请求头」里自行指定），"
-                    "或该出口 IP 被限制。"
+                    "Danbooru 拒绝了请求（403）：请求未被认可为已认证。\n"
+                    f"  · User-Agent 是否被发现是伪装浏览器（当前："
+                    f"{self.user_agent()}）\n"
+                    "  · 可在引擎页「自定义请求头」里自行指定 User-Agent\n"
+                    f"  · 也可能是该出口 IP 被限制\n"
+                    f"  Danbooru 原话：{body or '（无响应体）'}"
                 ) from e
             raise ConnectionError(f"Danbooru API 请求失败: {e}")
         finally:

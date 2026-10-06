@@ -154,17 +154,67 @@ class TestAuthErrorMessages:
 
 
 class _FailingSession:
-    """一个只会按指定状态码失败的假会话"""
+    """一个只会按指定状态码与响应体失败的假会话"""
 
-    def __init__(self, status):
+    def __init__(self, status, body=""):
         self.status = status
+        self.body = body
         self.headers = {}
 
     def post(self, *a, **k):
         import requests
         resp = requests.Response()
         resp.status_code = self.status
+        resp._content = self.body.encode("utf-8")
         raise requests.HTTPError(f"{self.status} error", response=resp)
 
     def close(self):
         pass
+
+
+class TestPermissionVersusAuthErrors:
+    """
+    403 有两种完全不同的成因，提示必须分开 —— 否则会把用户引到错误的方向。
+
+    实测（用真实账号）：
+        凭据有效但账号等级不足 → 403 {"error": "Access denied"}
+        凭据无效               → 401 {"error": "Invalid API key"}
+        UA 被判定为伪装        → 403 + "Can't verify CSRF token authenticity"
+
+    我第一版把 403 一律说成「UA 被判为伪装浏览器」—— 对着
+    Access denied 的响应给出这个提示，等于让用户去改一个没问题的东西。
+    """
+
+    def _engine(self):
+        from imgsearch.engines.danbooru import Danbooru
+        return Danbooru(login="some_user", api_key="x" * 32)
+
+    def test_access_denied_means_account_level(self, monkeypatch):
+        eng = self._engine()
+        body = '{"success":false,"error":"Access denied"}'
+        monkeypatch.setattr(eng, "make_session",
+                            lambda **k: _FailingSession(403, body))
+        with pytest.raises(ConnectionError) as ei:
+            eng.search_by_url("https://example.com/x.jpg")
+        msg = str(ei.value)
+        assert "等级" in msg
+        assert "IQDB 引擎" in msg, "要给出免费的替代方案"
+        assert "User-Agent" not in msg, "别把用户引去改没问题的东西"
+
+    def test_csrf_403_mentions_user_agent(self, monkeypatch):
+        eng = self._engine()
+        body = '{"error":"ActionController::InvalidAuthenticityToken"}'
+        monkeypatch.setattr(eng, "make_session",
+                            lambda **k: _FailingSession(403, body))
+        with pytest.raises(ConnectionError) as ei:
+            eng.search_by_url("https://example.com/x.jpg")
+        assert "User-Agent" in str(ei.value)
+
+    def test_original_response_is_included(self, monkeypatch):
+        """把对方原话带上，便于用户自己搜或反馈"""
+        eng = self._engine()
+        monkeypatch.setattr(eng, "make_session",
+                            lambda **k: _FailingSession(403, '{"error":"Access denied"}'))
+        with pytest.raises(ConnectionError) as ei:
+            eng.search_by_url("https://example.com/x.jpg")
+        assert "Access denied" in str(ei.value)
