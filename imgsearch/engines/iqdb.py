@@ -30,7 +30,6 @@ from PIL import Image
 
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import COMMON_SCHEMA, STR, Field, Schema
-from imgsearch.utils.network import create_session
 
 # iqdb.org 首页表单默认勾选的服务
 DEFAULT_SERVICES = "1,2,3,4,5,6,11,13"
@@ -134,10 +133,7 @@ class Iqdb(SearchEngine):
         return self._post(data={"url": image_url})
 
     def _post(self, files: dict = None, data: dict = None) -> List[SearchResult]:
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-        )
+        session = self.make_session()
 
         # IQDB 用 service[] 这个重复字段名勾选图库，requests 需要传 list of tuples
         payload = [(k, v) for k, v in (data or {}).items()]

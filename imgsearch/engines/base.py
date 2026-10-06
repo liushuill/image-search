@@ -220,6 +220,52 @@ class SearchEngine:
 
     # ── 接口 ──────────────────────────────────────────────────
 
+    # ── 请求构造 ──────────────────────────────────────────────
+
+    def user_agent(self) -> str:
+        """
+        本引擎应使用的 User-Agent；返回空串表示用全局默认。
+
+        ⚠️ 全局默认是一个**伪造的浏览器 UA**（为了绕过部分站点的 Cloudflare）。
+        但有些站点明确要求客户端表明身份，甚至会拒掉伪造 UA ——
+        例如 Danbooru 实测：伪造 UA 走代理得到 403，诚实 UA 得到 200。
+        这类引擎覆写本方法。
+        """
+        return ""
+
+    def make_session(self, **kwargs):
+        """
+        建会话，并应用「自定义请求头」。
+
+        ⚠️ 之前各引擎直接调 create_session，`headers` 配置项只被存下来、
+        从未被用 —— GUI 里能填、写着"自定义请求头"，实际毫无作用。
+        """
+        from imgsearch.utils.network import create_session
+
+        session = create_session(
+            proxies=self.proxies,
+            timeout=self.timeout,
+            user_agent=self.user_agent() or None,
+            **kwargs,
+        )
+        if self.headers:
+            session.headers.update(
+                {str(k): str(v) for k, v in self.headers.items()})
+        return session
+
+    def merge_params(self, payload: dict) -> dict:
+        """
+        并入「自定义查询参数」。
+
+        同名的键**以引擎自身的为准** —— 否则用户一次手滑覆盖了 url/limit，
+        搜索会静默地搜错东西，比"没生效"更难排查。
+        """
+        if not self.params:
+            return dict(payload)
+        merged = {str(k): str(v) for k, v in self.params.items()}
+        merged.update(payload)
+        return merged
+
     def quota_state(self) -> List[QuotaState]:
         """
         本引擎当前的额度状态；默认表示「无限制」。

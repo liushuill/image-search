@@ -24,7 +24,6 @@ from bs4 import BeautifulSoup
 
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import BOOL, COMMON_SCHEMA, Field, Schema
-from imgsearch.utils.network import create_session
 
 
 # 临时图床 API（用于 Ascii2D 无法直接上传的备选方案）
@@ -99,11 +98,7 @@ class Ascii2D(SearchEngine):
         Ascii2D 的 /search/color/ 端点接受文件上传，
         虽然结果是按颜色匹配的，但后续可以切换到 detail 视图。
         """
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-            use_cloudscraper=self.bypass_cfw,
-        )
+        session = self.make_session(use_cloudscraper=self.bypass_cfw)
 
         try:
             with open(file_path, "rb") as f:
@@ -133,11 +128,7 @@ class Ascii2D(SearchEngine):
         Returns:
             图片的公开 URL
         """
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-            use_cloudscraper=self.bypass_cfw,
-        )
+        session = self.make_session(use_cloudscraper=self.bypass_cfw)
 
         try:
             # catbox.moe 要求 files 参数和 reqtype=fileupload
@@ -171,11 +162,7 @@ class Ascii2D(SearchEngine):
         Returns:
             搜索结果列表
         """
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-            use_cloudscraper=self.bypass_cfw,
-        )
+        session = self.make_session(use_cloudscraper=self.bypass_cfw)
 
         try:
             encoded_url = quote(image_url, safe="")
@@ -209,11 +196,7 @@ class Ascii2D(SearchEngine):
     def _parse_result_page(self, page_url: str) -> List[SearchResult]:
         """解析 Ascii2D 结果页面"""
         results = []
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-            use_cloudscraper=self.bypass_cfw,
-        )
+        session = self.make_session(use_cloudscraper=self.bypass_cfw)
 
         try:
             resp = session.get(page_url, timeout=self.timeout)

@@ -239,15 +239,22 @@ class TestEnginesDoNotReadProxyThemselves:
     自动降级被彻底架空，表现为「明明提示已降级直连，请求却仍走代理并失败」。
     """
 
-    def _freeze(self, monkeypatch, module):
-        """拦住 create_session，记录它收到的 proxies"""
+    def _freeze(self, monkeypatch, module=None):
+        """
+        拦住 create_session，记录它收到的 proxies。
+
+        ⚠️ 现在所有引擎都经过 base.make_session 建会话（这样「自定义请求头」
+        才会生效），而它在方法内部从 utils.network 延迟导入 create_session。
+        所以补丁要打在**来源模块**上，打在引擎模块上已经没有这个东西了。
+        """
+        import imgsearch.utils.network as net
         seen = {}
 
         def fake_create_session(**kwargs):
             seen.update(kwargs)
             raise RuntimeError("到此为止，不真的发请求")
 
-        monkeypatch.setattr(module, "create_session", fake_create_session)
+        monkeypatch.setattr(net, "create_session", fake_create_session)
         return seen
 
     def test_iqdb_ignores_config_proxy_when_given_none(self, monkeypatch):

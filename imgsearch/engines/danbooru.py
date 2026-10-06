@@ -23,7 +23,6 @@ from PIL import Image
 from imgsearch import secrets
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import COMMON_SCHEMA, Field, Schema
-from imgsearch.utils.network import create_session
 
 
 class Danbooru(SearchEngine):
@@ -82,6 +81,21 @@ class Danbooru(SearchEngine):
                 "  2. 写入 .env：DANBOORU_API_KEY=你的KEY"
             )
 
+    def user_agent(self) -> str:
+        """
+        Danbooru 要求客户端表明身份。
+
+        其文档原文：**"Don't impersonate browsers"**，
+        而且它真的会执行 —— 实测同一代理、同一端点、只改 UA：
+
+            伪造 Chrome UA → HTTP 403
+            诚实 UA        → HTTP 200
+
+        也就是说全局那个伪造浏览器 UA 会让 Danbooru 引擎**必然 403**。
+        带上账号名，也便于对方在限流时联系而不是直接封禁。
+        """
+        return f"image-search/1.0 (user {self.login or 'anonymous'})"
+
     def search(self, image_path: str) -> List[SearchResult]:
         """
         通过上传图片搜索
@@ -126,10 +140,7 @@ class Danbooru(SearchEngine):
         data: dict = None,
     ) -> List[SearchResult]:
         """调用 Danbooru IQDB API"""
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-        )
+        session = self.make_session()
 
         # HTTP Basic Auth (login:api_key)
         session.auth = HTTPBasicAuth(self.login, self.api_key)
@@ -141,12 +152,32 @@ class Danbooru(SearchEngine):
         payload = {"limit": 20}
         if data:
             payload.update(data)
+        payload = self.merge_params(payload)
 
         try:
             resp = session.post(endpoint, files=files, data=payload, timeout=self.timeout)
             resp.raise_for_status()
             posts = resp.json()
         except requests.RequestException as e:
+            status = getattr(getattr(e, "response", None), "status_code", None)
+            if status == 401:
+                # 亲手把「填错哪个字段」说清楚 —— 这是用户最可能卡住的地方
+                raise ConnectionError(
+                    "Danbooru 认证失败（401）：用户名或 API Key 不正确。\n"
+                    f"  当前用户名：{self.login or '（空）'}\n"
+                    "  · 用户名填**账号名**（不是邮箱）—— 其文档原文："
+                    "\"login is your username\"\n"
+                    "  · API Key 在 https://danbooru.donmai.us/profile "
+                    "→ 点 Generate API key\n"
+                    "  两者都在「凭据」页填写。"
+                ) from e
+            if status == 403:
+                raise ConnectionError(
+                    "Danbooru 拒绝了请求（403）。\n"
+                    "  常见原因：User-Agent 被判为伪装浏览器"
+                    "（可在引擎页「自定义请求头」里自行指定），"
+                    "或该出口 IP 被限制。"
+                ) from e
             raise ConnectionError(f"Danbooru API 请求失败: {e}")
         finally:
             session.close()

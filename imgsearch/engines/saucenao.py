@@ -23,7 +23,6 @@ from imgsearch.engines.schema import (
     COMMON_SCHEMA, INT, Field, RATE_LIMIT_SCHEMA, Schema,
 )
 from imgsearch.config import PROJECT_DIR
-from imgsearch.utils.network import create_session
 
 
 class SauceNAO(SearchEngine):
@@ -176,10 +175,7 @@ class SauceNAO(SearchEngine):
         # 检查每日限额
         self._check_daily_quota()
 
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-        )
+        session = self.make_session()
 
         data = {
             "api_key": self.api_key,

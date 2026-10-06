@@ -25,7 +25,6 @@ from PIL import Image
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.quota import QuotaExceeded, SlidingWindowQuota
 from imgsearch.engines.schema import BOOL, COMMON_SCHEMA, INT, Field, Schema
-from imgsearch.utils.network import create_session
 
 # TraceMoe 实测限额：100 次 / 60 秒
 DEFAULT_LIMIT = 100
@@ -109,10 +108,7 @@ class TraceMoe(SearchEngine):
         if self.opt_bool("cut_borders", True):
             query["cutBorders"] = ""
 
-        session = create_session(
-            proxies=self.proxies,
-            timeout=self.timeout,
-        )
+        session = self.make_session()
         try:
             resp = session.post(
                 self.api_url or self.DEFAULT_API_URL,
