@@ -59,7 +59,6 @@ sys.stdout = _force_utf8(sys.stdout)
 sys.stderr = _force_utf8(sys.stderr)
 
 import argparse
-import csv
 import json
 import re
 import time
@@ -209,129 +208,98 @@ def cmd_search(args):
 
 
 def cmd_batch(args):
-    """处理 batch 子命令"""
-    dir_path = args.directory
-    dir_path = Path(dir_path)
+    """
+    批量识别一个目录里的图片。
 
-    if not dir_path.is_dir():
-        print(f"❌ 目录不存在: {dir_path}")
-        sys.exit(1)
-
-    # 收集所有图片
-    image_files = []
-    for ext in [".jpg", ".jpeg", ".png", ".webp", ".bmp", ".gif"]:
-        image_files.extend(dir_path.glob(f"*{ext}"))
-        image_files.extend(dir_path.glob(f"*{ext.upper()}"))
-
-    if not image_files:
-        print(f"❌ 目录中没有找到图片文件: {dir_path}")
-        sys.exit(1)
-
-    # 支持的图片前缀
-    print(f"\n📁 找到 {len(image_files)} 个图片文件")
-    print("=" * 50)
-
-    # 统计
-    success_count = 0
-    fail_count = 0
-    results_log = []
-
-    # log_entry 公共基座（各分支用 dict unpacking 覆盖差异字段）
-    _LOG_ENTRY_BASE = dict(
-        source=None, similarity=None,
-        pixiv_id=None, pixiv_page=None, pixiv_image_id=None,
-        artist=None, artist_id=None, title=None,
-        material=None, ext_url=None, highres_url=None,
-        danbooru_id=None, gelbooru_id=None, twitter_id=None,
-        error=None,
+    ⚠️ 与旧实现的关键差异（旧版对"一堆图"这个场景基本不可用）：
+      · 走 search_with_cache → **先查缓存**，已识别过的零配额跳过，
+        因此「重跑 = 接着上次跑」（旧版每跑一次都重新烧一遍配额）
+      · 结果**写入图库**（旧版跑完图库还是空的，等于白跑）
+      · **递归**子目录（旧版只 glob 一层，子目录里的图直接被忽略）
+      · 额度用尽时的行为由配置项 batch_quota_policy 决定
+        （旧版是静默换用覆盖差很多的引擎）
+    """
+    from imgsearch.batch import (
+        DEFAULT_QUOTA_POLICY, plan_batch, run_batch,
     )
 
-    for i, img_path in enumerate(image_files, 1):
-        print(f"\n[{i}/{len(image_files)}] 处理: {img_path.name}")
-        print("-" * 40)
+    directory = args.directory
+    if not Path(directory).is_dir():
+        print(f"❌ 目录不存在: {directory}")
+        sys.exit(1)
 
+    recursive = bool(get("batch_recursive", True)) and not args.no_recursive
+    limit = args.limit if args.limit is not None else int(get("batch_limit", 20) or 0)
+    policy = args.policy or str(get("batch_quota_policy", DEFAULT_QUOTA_POLICY))
+
+    try:
+        plan = plan_batch(directory, recursive=recursive, limit=limit)
+    except NotADirectoryError as e:
+        print(f"❌ {e}")
+        sys.exit(1)
+
+    print()
+    print(plan.summary())
+    if not plan.total:
+        print("\n📭 目录里没有找到图片文件")
+        return
+
+    if args.dry_run:
+        print("\n（--dry-run：只做预览，未消耗任何配额）")
+        return
+
+    print()
+    print(f"额度策略：{policy}"
+          + ("（用尽即停，不会换用覆盖较差的引擎）" if policy == "stop"
+             else "（用尽后继续用其他引擎，报告里会注明降级来源）"))
+    print("=" * 60)
+
+    collected = []
+
+    def on_progress(item):
+        icon = {"cached": "♻️", "success": "✅", "no_match": "❔",
+                "error": "⚠️"}.get(item.status, "·")
+        extra = f"　{item.engine}" if item.engine else ""
+        note = f"　{item.message}" if item.message and item.status != "success" else ""
+        print(f"[{item.index}/{item.total}] {icon} {Path(item.path).name}"
+              f"{extra}{note}")
+
+    def on_record(path, outcome):
+        if outcome is not None and getattr(outcome, "results", None):
+            collected.append((str(path), outcome))
+
+    try:
+        report = run_batch(
+            directory, recursive=recursive, limit=limit, quota_policy=policy,
+            on_progress=on_progress, on_record=on_record, quiet=True,
+        )
+    except KeyboardInterrupt:
+        print("\n⏹ 已中断")
+        sys.exit(130)
+
+    print("=" * 60)
+    print(report.summary())
+
+    if collected and args.export:
+        from imgsearch.exporters import from_results
+        from imgsearch.exporters.cli import (
+            _handle_clipboard, _print_written, export_records,
+        )
+        records = []
+        for path, outcome in collected:
+            records.extend(from_results(outcome.results, file=path,
+                                        dhash=outcome.dhash,
+                                        from_cache=outcome.from_cache))
         try:
-            results = search_image(str(img_path))
-            if results:
-                success_count += 1
-                best = results[0]
-                log_entry = dict(
-                    _LOG_ENTRY_BASE,
-                    file=str(img_path), status="success",
-                    source=best.source,
-                    similarity=best.similarity,
-                    pixiv_id=best.pixiv_id,
-                    pixiv_page=best.pixiv_page,
-                    pixiv_image_id=best.pixiv_image_id(),
-                    artist=best.artist,
-                    artist_id=best.artist_id,
-                    title=best.title,
-                    material=best.material,
-                    ext_url=best.ext_urls[0] if best.ext_urls else None,
-                    highres_url=best.highres_url,
-                    danbooru_id=best.danbooru_id,
-                    gelbooru_id=best.gelbooru_id,
-                    twitter_id=best.twitter_id,
-                )
-                print_results([best])
-            else:
-                fail_count += 1
-                log_entry = dict(
-                    _LOG_ENTRY_BASE,
-                    file=str(img_path), status="no_match",
-                )
-                print("  ❌ 未找到匹配")
-
-        except Exception as e:
-            fail_count += 1
-            log_entry = dict(
-                _LOG_ENTRY_BASE,
-                file=str(img_path), status="error",
-                error=str(e),
+            written, clipboard_text = export_records(
+                records, args.export, outdir=args.outdir,
+                name_template=args.name_template,
             )
-            print(f"  ❌ 搜索失败: {e}")
-
-        results_log.append(log_entry)
-
-        # 搜索间隔，避免触发 SauceNAO 限流 (4次/30秒)
-        if i < len(image_files):
-            delay = get("request_delay", 8.0)
-            print(f"  ⏳ 等待 {delay} 秒后继续下一张...")
-            time.sleep(delay)
-
-    # 打印统计
-    print("\n" + "=" * 50)
-    print("📊 批量搜索完成:")
-    print(f"   ✅ 成功: {success_count}")
-    print(f"   ❌ 失败: {fail_count}")
-    print(f"   📁 总计: {len(image_files)}")
-
-    # 保存 JSON 日志
-    log_path_json = dir_path / "search_results.json"
-    try:
-        with open(log_path_json, "w", encoding="utf-8") as f:
-            json.dump(results_log, f, ensure_ascii=False, indent=2)
-        print(f"   📝 JSON 结果已保存: {log_path_json}")
-    except Exception as e:
-        print(f"   ⚠️ 保存 JSON 日志失败: {e}")
-
-    # 保存 CSV 日志（便于 Excel 查看）
-    log_path_csv = dir_path / "search_results.csv"
-    try:
-        fieldnames = [
-            "file", "status", "source", "similarity",
-            "pixiv_id", "pixiv_page", "pixiv_image_id",
-            "artist", "artist_id", "title", "material",
-            "ext_url", "highres_url",
-            "danbooru_id", "gelbooru_id", "twitter_id", "error",
-        ]
-        with open(log_path_csv, "w", encoding="utf-8-sig", newline="") as f:
-            writer = csv.DictWriter(f, fieldnames=fieldnames)
-            writer.writeheader()
-            writer.writerows(results_log)
-        print(f"   📊 CSV 结果已保存: {log_path_csv}")
-    except Exception as e:
-        print(f"   ⚠️ 保存 CSV 日志失败: {e}")
+            _print_written(written)
+            if clipboard_text:
+                _handle_clipboard(clipboard_text)
+        except ValueError as e:
+            print(f"\n⚠️ 导出失败：{e}")
 
 
 def _resolve_proxies() -> Optional[dict]:
@@ -624,8 +592,29 @@ def main():
     )
 
     # batch 子命令
-    batch_parser = subparsers.add_parser("batch", help="批量搜索目录中的图片")
+    batch_parser = subparsers.add_parser(
+        "batch",
+        help="批量识别目录里的图片（先查缓存，已识别过的零配额跳过）",
+        description=(
+            "批量识别一个目录里的图片，结果写入本地图库。\n\n"
+            "已识别过的图会命中缓存直接跳过，**不消耗配额**，\n"
+            "因此重跑就是「接着上次跑」，可以分几天把大批图慢慢跑完。"
+        ),
+    )
     batch_parser.add_argument("directory", help="图片目录路径")
+    batch_parser.add_argument("--limit", type=int, default=None,
+                              help="本次最多识别多少张（默认取配置 batch_limit）")
+    batch_parser.add_argument("--no-recursive", action="store_true",
+                              help="只处理当前目录，不含子目录")
+    batch_parser.add_argument("--policy", choices=["stop", "fallback"], default=None,
+                              help="额度用尽时：stop 停下（默认）/ fallback 换其他引擎")
+    batch_parser.add_argument("--dry-run", action="store_true",
+                              help="只预览要处理多少、还剩多少额度，不做任何搜索")
+    batch_parser.add_argument("--export", default=None, metavar="格式列表",
+                              help="识别完顺便导出本次新搜到的结果，如 urls,csv,html")
+    batch_parser.add_argument("--outdir", "-o", default=None, help="导出目录")
+    batch_parser.add_argument("--name-template", default=None,
+                              help="导出文件名模板")
 
     # config 子命令
     config_parser = subparsers.add_parser("config", help="配置管理")

@@ -11,10 +11,54 @@ SauceNAO（4 次/30 秒、100 次/24 小时）与 TraceMoe（实测 100 次/60 �
 
 import json
 import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, List, Optional
 
 from imgsearch.config import DATA_DIR
+
+
+@dataclass
+class QuotaState:
+    """
+    某一层滑动窗口的额度状态。
+
+    存在的理由：**配额文件是按引擎各自命名的**（SauceNAO 用的是历史文件名
+    ``saucenao_quota.json``，而不是通用的 ``quota_saucenao.json``），
+    所以外面不能自己重建一个计数器去读状态 —— 那样会读到另一个空文件，
+    于是"剩余 100 次"永远不变。必须由引擎自己报。
+    """
+
+    name: str
+    label: str = ""
+    limit: int = 0
+    window: int = 0
+    used: int = 0
+    reset_in: int = 0
+
+    @property
+    def unlimited(self) -> bool:
+        return self.limit <= 0 or self.window <= 0
+
+    @property
+    def remaining(self) -> int:
+        """剩余次数；不限制时返回 -1"""
+        if self.unlimited:
+            return -1
+        return max(0, self.limit - self.used)
+
+    @property
+    def exhausted(self) -> bool:
+        return not self.unlimited and self.remaining <= 0
+
+    def summary(self) -> str:
+        if self.unlimited:
+            return f"{self.label or self.name}：无限制"
+        text = f"{self.label or self.name}：{self.used}/{self.limit}"
+        if self.reset_in:
+            hours = self.reset_in / 3600
+            text += f"（约 {hours:.1f} 小时后释放）" if hours >= 1 else f"（{self.reset_in} 秒后释放）"
+        return text
 
 
 class QuotaExceeded(RuntimeError):
@@ -66,6 +110,12 @@ class SlidingWindowQuota:
         if self.unlimited:
             return -1
         return max(0, self.limit - self.used())
+
+    def state(self) -> "QuotaState":
+        """当前额度状态（供批量识别等功能做决策与展示）"""
+        return QuotaState(name=self.name, label=self.label, limit=self.limit,
+                          window=self.window, used=self.used(),
+                          reset_in=self.reset_in())
 
     def reset_in(self) -> int:
         """距离最早一次请求过期还有多少秒；不适用时返回 0"""

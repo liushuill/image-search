@@ -212,6 +212,14 @@ class LibraryPage(QtWidgets.QWidget):
         self.btn_open.clicked.connect(self._open_dir)
         ops.addWidget(self.btn_open)
 
+        self.btn_batch = QtWidgets.QPushButton("识别未搜索的图…")
+        self.btn_batch.setToolTip(
+            "把选中路径（未选中则全部）下的图片逐个识别，结果写入图库。\n"
+            "已识别过的会命中缓存跳过，不消耗配额。"
+        )
+        self.btn_batch.clicked.connect(self._batch_search)
+        ops.addWidget(self.btn_batch)
+
         self.btn_export = QtWidgets.QPushButton("导出图库…")
         self.btn_export.setToolTip("把已经搜过的批量导出（勾选多条路径时以选中的为准）")
         self.btn_export.clicked.connect(self._export)
@@ -418,6 +426,33 @@ class LibraryPage(QtWidgets.QWidget):
             lambda db, store: RootManager(db).set_label(root.id, label.strip())
         )
         self.reload()
+
+    def _batch_search(self) -> None:
+        """
+        批量识别。
+
+        需要一个**目录**：优先用选中的已登记根路径；
+        没选中就让用户挑一个（也允许挑一个还没登记的目录 ——
+        识别结果照样会按图库身份记下来）。
+        """
+        from imgsearch_gui.dialogs.batch_dialog import BatchDialog
+
+        directory = ""
+        root_id = self._selected_root_id()
+        if root_id is not None:
+            root = self._with_library(
+                lambda db, store: store.roots.get(root_id))
+            if root is not None:
+                directory = root.path
+
+        if not directory:
+            directory = QtWidgets.QFileDialog.getExistingDirectory(
+                self, "选择要批量识别的目录",
+                str(QtCore.QDir.home()))
+            if not directory:
+                return
+
+        BatchDialog(directory, self).exec()
 
     def _export(self) -> None:
         """

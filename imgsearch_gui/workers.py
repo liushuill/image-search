@@ -279,3 +279,54 @@ class ExportWorker(QtCore.QThread):
         finally:
             writer.flush()
         self.done.emit([str(p) for p in written], clipboard_text)
+
+
+class BatchWorker(QtCore.QThread):
+    """
+    后台批量识别。
+
+    必须放在后台：批量会按主引擎的速率限制**逐张节流等待**
+    （SauceNAO 4 次/30 秒 → 每张等 7.5 秒），跑几十张就是几分钟。
+    放在 UI 线程会直接假死。
+
+    取消通过 ``should_stop`` 回调实现，因此节流等待期间也能及时响应
+    （等待是分小片睡的，最多 0.25 秒就检查一次）。
+    """
+
+    progress = QtCore.Signal(object)      # BatchProgress
+    done = QtCore.Signal(object)          # BatchReport
+    failed = QtCore.Signal(str)
+
+    def __init__(self, directory: str, *, recursive: bool = True,
+                 limit=None, policy: str = "stop", parent=None):
+        super().__init__(parent)
+        self.directory = directory
+        self.recursive = recursive
+        self.limit = limit
+        self.policy = policy
+        self._stop = False
+
+    def cancel(self) -> None:
+        self._stop = True
+
+    @property
+    def cancelled(self) -> bool:
+        return self._stop
+
+    def run(self) -> None:  # noqa: D102
+        from imgsearch.batch import run_batch
+
+        try:
+            report = run_batch(
+                self.directory,
+                recursive=self.recursive,
+                limit=self.limit,
+                quota_policy=self.policy,
+                on_progress=self.progress.emit,
+                should_stop=lambda: self._stop,
+                quiet=True,
+            )
+        except Exception as e:                # noqa: BLE001
+            self.failed.emit(f"{type(e).__name__}: {e}")
+            return
+        self.done.emit(report)

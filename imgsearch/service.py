@@ -169,6 +169,7 @@ def search_with_cache(
     min_similarity: Optional[int] = None,
     use_library: Optional[bool] = None,
     on_progress: Optional[Callable[[str], None]] = None,
+    before_search: Optional[Callable[[], None]] = None,
 ) -> SearchOutcome:
     """
     完整流程：查图库缓存 → 未命中则联网搜索 → 结果入库。
@@ -180,6 +181,11 @@ def search_with_cache(
         min_similarity: 覆盖相似度阈值
         use_library: 是否使用图库；None 时读配置
         on_progress: 可选进度回调（GUI 用；CLI 不需要）
+        before_search: 缓存未命中、**即将联网（要花配额）之前**调用的钩子。
+            批量识别用它来判断额度是否还够，不够就抛
+            :class:`~imgsearch.engines.quota.QuotaExceeded` 中止。
+            放在这里是因为只有这个函数知道"接下来真的要花钱了"——
+            在调用方判断会重复算一次指纹。
 
     Returns:
         SearchOutcome
@@ -202,6 +208,9 @@ def search_with_cache(
 
     # 联网搜索（延迟导入，避免服务模块反向依赖 cli）
     from imgsearch.cli import search_image
+
+    if before_search is not None:
+        before_search()
 
     results = search_image(image_path, engine=engine, min_similarity=min_similarity)
     outcome.results = results

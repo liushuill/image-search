@@ -3,26 +3,9 @@
   "proxy_check_url": "https://www.google.com/generate_204",
   "search_engines": [
     {
-      "name": "ascii2d",
-      "enabled": false,
-      "priority": 1,
-      "module_path": "",
-      "class_name": "",
-      "settings": {
-        "api_url": "https://ascii2d.net",
-        "headers": {},
-        "params": {},
-        "request_delay": 3.0,
-        "timeout": 30,
-        "bypass_cfw": false,
-        "proxy_mode": "off",
-        "min_similarity": 60
-      }
-    },
-    {
       "name": "sauceNAO",
       "enabled": true,
-      "priority": 2,
+      "priority": 1,
       "module_path": "",
       "class_name": "",
       "settings": {
@@ -43,6 +26,23 @@
         "numres": 5,
         "proxy_mode": "auto",
         "min_similarity": 70
+      }
+    },
+    {
+      "name": "ascii2d",
+      "enabled": false,
+      "priority": 2,
+      "module_path": "",
+      "class_name": "",
+      "settings": {
+        "api_url": "https://ascii2d.net",
+        "headers": {},
+        "params": {},
+        "request_delay": 3.0,
+        "timeout": 30,
+        "bypass_cfw": false,
+        "proxy_mode": "off",
+        "min_similarity": 60
       }
     },
     {

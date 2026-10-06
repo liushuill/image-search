@@ -113,6 +113,55 @@ class SettingsPage(QtWidgets.QWidget):
         # 它里面的复选框会变成「已删除的 C++ 对象」，点保存直接崩。
         outer.addWidget(lib)
 
+        # ── 批量识别 ──
+        batch = self._card("批量识别")
+        blay = batch.layout()
+
+        self.batch_policy = QtWidgets.QComboBox()
+        self.batch_policy.addItem("停下来，报告还剩多少（推荐）", "stop")
+        self.batch_policy.addItem("继续用其他引擎（结果质量可能下降）", "fallback")
+        self.batch_policy.setToolTip(
+            "SauceNAO 免费额度是 100 次/天。额度用尽时：\n"
+            "· 停下来 —— 不会不知情地拿覆盖较差的引擎凑数，\n"
+            "  已识别的都已入库，明天再点一次会自动接着跑\n"
+            "· 继续 —— 换用其他引擎把剩下的跑完，\n"
+            "  报告里会注明哪些结果来自降级引擎"
+        )
+        row = QtWidgets.QHBoxLayout()
+        row.addWidget(QtWidgets.QLabel("额度用尽时："))
+        row.addWidget(self.batch_policy, 1)
+        holder = QtWidgets.QWidget()
+        holder.setLayout(row)
+        blay.addWidget(holder)
+
+        self.batch_limit = QtWidgets.QSpinBox()
+        self.batch_limit.setRange(0, 100000)
+        self.batch_limit.setSpecialValueText("不限")
+        self.batch_limit.setSuffix(" 张")
+        self.batch_limit.setToolTip(
+            "一次批量最多识别多少张（0 = 不限）。\n"
+            "默认给个安全值，免得手一滑就用光当天全部额度。"
+        )
+        row2 = QtWidgets.QHBoxLayout()
+        row2.addWidget(QtWidgets.QLabel("单次上限："))
+        row2.addWidget(self.batch_limit)
+        row2.addStretch(1)
+        holder2 = QtWidgets.QWidget()
+        holder2.setLayout(row2)
+        blay.addWidget(holder2)
+
+        self.batch_recursive = QtWidgets.QCheckBox("包含子目录")
+        blay.addWidget(self.batch_recursive)
+
+        note = QtWidgets.QLabel(
+            "批量识别会<b>先查缓存</b>：已识别过的图直接跳过、不消耗配额，"
+            "因此随时中断、分几天跑都可以。"
+        )
+        note.setObjectName("FieldHelp")
+        note.setWordWrap(True)
+        blay.addWidget(note)
+        outer.addWidget(batch)
+
         # ── 保存条 ──
         self.message = QtWidgets.QLabel()
         self.message.setObjectName("FieldHelp")
@@ -158,6 +207,12 @@ class SettingsPage(QtWidgets.QWidget):
         self.check_url_edit.setText(str(get("proxy_check_url", "") or ""))
         self.use_library.setChecked(bool(get("use_library", True)))
         self.cache_thumbs.setChecked(bool(get("cache_thumbnails", True)))
+
+        policy = str(get("batch_quota_policy", "stop") or "stop")
+        idx = self.batch_policy.findData(policy)
+        self.batch_policy.setCurrentIndex(idx if idx >= 0 else 0)
+        self.batch_limit.setValue(int(get("batch_limit", 20) or 0))
+        self.batch_recursive.setChecked(bool(get("batch_recursive", True)))
         self.message.setText("")
         self.proxy_result.setText("")
 
@@ -168,6 +223,9 @@ class SettingsPage(QtWidgets.QWidget):
             or "https://www.google.com/generate_204",
             use_library=self.use_library.isChecked(),
             cache_thumbnails=self.cache_thumbs.isChecked(),
+            batch_quota_policy=self.batch_policy.currentData(),
+            batch_limit=self.batch_limit.value(),
+            batch_recursive=self.batch_recursive.isChecked(),
         )
         self.message.setStyleSheet(f"color:{style.OK};")
         self.message.setText("✅ 已保存。引擎页的「代理」下拉会按新的全局设置生效。")

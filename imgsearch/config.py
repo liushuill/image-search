@@ -39,6 +39,19 @@ _SECRET_KEYS = {
     "danbooru_api_key": "DANBOORU_API_KEY",
 }
 
+# 批量识别的默认行为
+#   batch_quota_policy: 引擎额度用尽时
+#       "stop"     → 停下来报告还剩多少（默认；不会不知情地拿弱引擎凑数）
+#       "fallback" → 继续用其他引擎，但报告里指明降级来源
+#   batch_limit: 一次最多识别多少张（0 = 不限）。默认给个安全值，
+#       免得手一滑就用光当天全部额度
+#   batch_recursive: 是否递归子目录
+_BATCH_DEFAULTS = {
+    "batch_quota_policy": "stop",
+    "batch_limit": 20,
+    "batch_recursive": True,
+}
+
 _DEFAULT_CONFIG = {
     "proxy": "",
     # 代理探活地址（需要一条「经代理访问外网」的通路来验证代理是否真的可用）
@@ -49,6 +62,8 @@ _DEFAULT_CONFIG = {
     "use_library": True,
     # 是否为已入库的图生成缩略图缓存（清理页可单独清掉这一类）
     "cache_thumbnails": True,
+    # 批量识别（见下方 _BATCH_DEFAULTS 的说明）
+    **_BATCH_DEFAULTS,
 }
 
 _config = None

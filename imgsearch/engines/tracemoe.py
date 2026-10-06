@@ -76,6 +76,9 @@ class TraceMoe(SearchEngine):
 
     # ── 搜索 ────────────────────────────────────
 
+    def quota_state(self):
+        return [self._quota.state()]
+
     def search(self, image_path: str) -> List[SearchResult]:
         """通过上传图片文件搜索"""
         file_path = Path(image_path)

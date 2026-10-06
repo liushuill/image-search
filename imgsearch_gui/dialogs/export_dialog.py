@@ -45,7 +45,7 @@ class ExportDialog(QtWidgets.QDialog):
         outer.addWidget(head)
 
         hint = QtWidgets.QLabel(
-            "导出的是**地址**，不含图片文件本身。可同时勾选多种格式，一次产出。"
+            "导出的是<b>地址</b>，不含图片文件本身。可同时勾选多种格式，一次产出。"
         )
         hint.setObjectName("PageHint")
         hint.setWordWrap(True)

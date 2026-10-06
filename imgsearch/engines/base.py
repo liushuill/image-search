@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from imgsearch.engines.quota import QuotaState
+
 # 从来源链接里认出 Pixiv 作品 ID 的两种写法：
 #   新式  https://www.pixiv.net/artworks/74267012
 #   旧式  https://www.pixiv.net/member_illust.php?mode=medium&illust_id=74267012
@@ -217,6 +219,31 @@ class SearchEngine:
         return str(v).strip().lower() in {"1", "true", "yes", "y", "on", "是", "启用"}
 
     # ── 接口 ──────────────────────────────────────────────────
+
+    def quota_state(self) -> List[QuotaState]:
+        """
+        本引擎当前的额度状态；默认表示「无限制」。
+
+        有滑动窗口限额的引擎覆写它（见 SauceNAO / TraceMoe）。
+        ⚠️ 必须由**引擎自己**报，不能在外面重建计数器：
+        配额文件是按引擎各自命名的（SauceNAO 沿用历史文件名
+        `saucenao_quota.json`），外面重建会读到另一个空文件，
+        于是"剩余 100 次"永远不变。批量识别靠这个在联网前判断能否继续。
+        """
+        return []
+
+    def request_interval(self) -> float:
+        """
+        两次请求之间至少间隔多少秒；0 表示未声明。
+
+        用于批量识别**逐张节流**。为什么需要它：短期速率限制（如 SauceNAO
+        的 4 次/30 秒）是服务端判定的，超了会返回 429；而 auto 模式的引擎循环
+        把异常兜掉后换下一个引擎 —— 于是批量连续跑时，第 5 张起就被
+        **静默降级**到覆盖差很多的引擎，尽管当天额度还剩一大半。
+
+        批量按这个值放慢速度，就能让主引擎真的被每一张用到。
+        """
+        return 0.0
 
     def search(self, image_path: str) -> List[SearchResult]:
         """

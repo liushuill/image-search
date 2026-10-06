@@ -117,6 +117,22 @@ class SauceNAO(SearchEngine):
         """记录一次成功的 API 调用"""
         self._quota.record()
 
+    def quota_state(self):
+        return [self._quota.state()]
+
+    def request_interval(self) -> float:
+        """
+        短期速率限制换算成"每张之间等多久"。
+
+        SauceNAO 是 4 次/30 秒（限制由服务端判定），因此 30/4 = 7.5 秒。
+        不节流的话批量跑到第 5 张就会被 429，然后被静默降级到弱引擎。
+        """
+        limit = int(self.opt_int("short_limit", self.SHORT_LIMIT) or 0)
+        window = int(self.opt_int("short_window", self.SHORT_WINDOW) or 0)
+        if limit > 0 and window > 0:
+            return window / limit
+        return 0.0
+
     def search(self, image_path: str) -> List[SearchResult]:
         """
         通过文件上传搜索

@@ -368,7 +368,7 @@ class CleanupPage(QtWidgets.QWidget):
         box = QtWidgets.QMessageBox(self)
         box.setIcon(QtWidgets.QMessageBox.Warning)
         box.setWindowTitle("确认清理")
-        box.setText("以下数据会被删除，且**不可撤销**：")
+        box.setText("以下数据会被删除，且<b>不可撤销</b>：")
         box.setInformativeText(plan.describe())
         box.setStandardButtons(QtWidgets.QMessageBox.Yes | QtWidgets.QMessageBox.No)
         box.setDefaultButton(QtWidgets.QMessageBox.No)
