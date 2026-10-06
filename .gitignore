@@ -28,9 +28,13 @@ __pycache__/
 !/output/.gitkeep
 
 # ── 参考素材（非源码）──────────────────────────────────────
-# 当初存下来的 Danbooru API 文档网页，约 2.1M，可重新访问获取
-Help_Api Wiki _ Danbooru.html
-Help_Api Wiki _ Danbooru_files/
+# 从 Danbooru 保存下来的参考网页（API 文档、升级页等），每个约 1–2M，
+# 都能重新访问获取，且带 _files/ 资源目录。
+#
+# ⚠️ 用通配而不是逐条列举：保存第二份时就是因为忘了加规则，
+# `git add -A` 把 1.4k 行网页资源一起提交了进去。
+*Danbooru.html
+*Danbooru_files/
 
 # ── 编辑器 ────────────────────────────────────────────────
 .vscode/

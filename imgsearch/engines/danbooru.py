@@ -165,7 +165,7 @@ class Danbooru(SearchEngine):
                 raise ConnectionError(
                     "Danbooru 认证失败（401）：用户名或 API Key 不正确。\n"
                     f"  当前用户名：{self.login or '（空）'}\n"
-                    "  · 用户名填**账号名**（不是邮箱）—— 其文档原文："
+                    "  · 用户名填账号名（不是邮箱）—— 其文档原文："
                     "\"login is your username\"\n"
                     "  · API Key 在 https://danbooru.donmai.us/profile "
                     "→ 点 Generate API key\n"
@@ -178,22 +178,35 @@ class Danbooru(SearchEngine):
                 # 两种 403 的成因完全不同，必须分开说 ——
                 # 凭据有效但等级不够时是「Access denied」，
                 # 而 UA 被判定为伪装/未认证时是 CSRF 那条。
-                if "Access denied" in body:
+                if "User::PrivilegeError" in body or "Access denied" in body:
+                    # 依据 Danbooru 源码 ApiKey#has_permission?：
+                    #     ip_permitted?(ip) && action_permitted?(controller, action)
+                    # 两个列表默认为空 = 不限制；一旦填了就必须匹配。
+                    # 实测：同一把 Key 打 posts/counts/tags/iqdb 全部 403，
+                    # 而匿名 GET /iqdb_queries.json 却返回 200 ——
+                    # 所以这既不是账号等级问题，也不是端点本身不开放。
                     raise ConnectionError(
-                        "Danbooru 拒绝访问（403 Access denied）："
-                        "**凭据是对的，但账号等级不够**。\n"
-                        "  · 以图搜图（/iqdb_queries）不对普通 Member 账号开放，"
-                        "需要 Gold 及以上（付费）\n"
-                        "  · 替代方案：用 **IQDB 引擎** —— 它不需要任何账号"
-                        "就能查 Danbooru 的帖子，覆盖率略低\n"
+                        "Danbooru 拒绝访问（403 PrivilegeError）："
+                        "这把 API Key 被限制了。\n"
+                        "  Danbooru 校验 Key 时要求两者同时成立：\n"
+                        "    ① 请求的出口 IP 在 Key 的允许列表内\n"
+                        "    ② 端点（iqdb_queries:create）在 Key 的权限列表内\n"
+                        "  两个列表默认为空就等于不限制。你当前所有端点都被拒，\n"
+                        "  说明至少有一个列表被填过且不匹配。\n"
+                        "  修法：到 Danbooru 的 API Key 设置页清空这两个列表"
+                        "（或把出口 IP 加进去）。\n"
+                        "  注意走代理时出口 IP 会随节点变化。\n"
+                        "  替代方案：IQDB 引擎不需要任何账号，"
+                        "它同样会搜 Danbooru 的帖子。\n"
                         f"  Danbooru 原话：{body or '（无响应体）'}"
                     ) from e
+                # 认证没被认可（例如 CSRF）—— 这时才与 UA 有关
                 raise ConnectionError(
                     "Danbooru 拒绝了请求（403）：请求未被认可为已认证。\n"
-                    f"  · User-Agent 是否被发现是伪装浏览器（当前："
-                    f"{self.user_agent()}）\n"
+                    "  · User-Agent 是否被发现是伪装浏览器"
+                    f"（当前：{self.user_agent()}）\n"
                     "  · 可在引擎页「自定义请求头」里自行指定 User-Agent\n"
-                    f"  · 也可能是该出口 IP 被限制\n"
+                    "  · 也可能是该出口 IP 被限制\n"
                     f"  Danbooru 原话：{body or '（无响应体）'}"
                 ) from e
             raise ConnectionError(f"Danbooru API 请求失败: {e}")

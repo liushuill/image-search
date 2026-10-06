@@ -189,17 +189,27 @@ class TestPermissionVersusAuthErrors:
         from imgsearch.engines.danbooru import Danbooru
         return Danbooru(login="some_user", api_key="x" * 32)
 
-    def test_access_denied_means_account_level(self, monkeypatch):
+    def test_privilege_error_means_restricted_key(self, monkeypatch):
+        """
+        403 PrivilegeError 既不等于「账号等级不够」，也不等于 UA 问题。
+
+        依据 Danbooru 源码 ApiKey#has_permission? = ip_permitted? && action_permitted?，
+        两个列表默认为空即不限制。实测同一把 Key 打 posts/counts/tags/iqdb
+        **全部** 403，而匿名 GET /iqdb_queries.json 返回 200 ——
+        所以是「这把 Key 被限制了」，提示必须这么说。
+        """
         eng = self._engine()
-        body = '{"success":false,"error":"Access denied"}'
+        body = '{"success":false,"error":"User::PrivilegeError","message":"Access denied"}'
         monkeypatch.setattr(eng, "make_session",
                             lambda **k: _FailingSession(403, body))
         with pytest.raises(ConnectionError) as ei:
             eng.search_by_url("https://example.com/x.jpg")
         msg = str(ei.value)
-        assert "等级" in msg
-        assert "IQDB 引擎" in msg, "要给出免费的替代方案"
+        assert "API Key 被限制" in msg
+        assert "出口 IP" in msg and "权限列表" in msg
+        assert "IQDB 引擎" in msg, "要给出不需要账号的替代方案"
         assert "User-Agent" not in msg, "别把用户引去改没问题的东西"
+        assert "等级" not in msg, "别再说是账号等级问题 —— 已证伪"
 
     def test_csrf_403_mentions_user_agent(self, monkeypatch):
         eng = self._engine()
