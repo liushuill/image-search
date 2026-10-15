@@ -31,9 +31,14 @@ class FakeEngine:
 
 
 class FakeConfig:
-    def __init__(self, name, display=None):
+    def __init__(self, name, display=None, settings=None):
         self.name = name
         self.display_name = display or name
+        self.settings = dict(settings or {})
+
+    def get(self, key, default=None):
+        """search_image 会用它读 request_delay / proxy_mode 等"""
+        return self.settings.get(key, default)
 
 
 class FakeEngineStore:
@@ -439,3 +444,108 @@ class TestReportSummary:
         text = report.summary()
         for fragment in ("6", "4", "SauceNAO 4 次", "额度用尽", "接着跑"):
             assert fragment in text, fragment
+
+
+class TestNoUsableEngine:
+    """
+    区分「没搜到」与「没搜成」。
+
+    实测过：唯一启用的引擎缺 API Key 时，auto 模式会一路跳过，
+    最终提示「未找到匹配结果」—— 看起来像这张图搜不到，
+    实际是根本没发起搜索。
+    """
+
+    def test_batch_stops_immediately_when_no_engine_usable(self, tmp_path, monkeypatch):
+        """不能逐张失败 N 次 —— 每张原因相同，日志没有价值"""
+        make_images(tmp_path, 5)
+        called = install_fake_search(monkeypatch, lambda p: fake_outcome(True))
+        store = FakeEngineStore([
+            (FakeConfig("d", "Danbooru"), ValueError("API Key 未配置！")),
+        ])
+        report = B.run_batch(tmp_path, engine_store=store)
+        assert report.stopped == "no_engine"
+        assert report.failed == 0, "不该逐张记成失败"
+        assert called == [], "没有任何可用引擎时不该发起搜索"
+        # 原因要具体到「哪个引擎、为什么」，而不是笼统一句话
+        assert "无法构造" in report.stopped_detail
+        assert "API Key 未配置" in report.stopped_detail
+
+    def test_batch_proceeds_when_at_least_one_usable(self, tmp_path, monkeypatch):
+        """有可用的就照常跑，别因为另一个引擎坏掉就拒绝开工"""
+        make_images(tmp_path, 2)
+        install_fake_search(monkeypatch, lambda p: fake_outcome(True))
+        store = FakeEngineStore([
+            (FakeConfig("broken", "Bad"), ValueError("没凭据")),
+            (FakeConfig("ok", "IQDB"), FakeEngine("ok")),
+        ])
+        report = B.run_batch(tmp_path, engine_store=store)
+        assert report.stopped == ""
+        assert report.cached == 2
+
+    def test_search_image_raises_when_nothing_ran(self, monkeypatch):
+        """单图搜索：一个引擎都没跑起来时必须报错，而不是返回空"""
+        import imgsearch.cli as cli
+        from imgsearch.engines.store import EngineNotFoundError
+
+        class Boom:
+            def search(self, path):
+                raise AssertionError("不该被调用")
+
+        class Store:
+            def get_enabled(self):
+                return [FakeConfig("broken", "Broken")]
+
+            def build_engine(self, ec, proxies=None):
+                raise ValueError("API Key 未配置！")
+
+        monkeypatch.setattr(cli, "get_store", lambda: Store())
+        monkeypatch.setattr(cli, "_resolve_proxies", lambda: None)
+        with pytest.raises(EngineNotFoundError) as ei:
+            cli.search_image("/tmp/x.jpg")
+        msg = str(ei.value)
+        assert "没有" in msg and "并未真正发起搜索" in msg
+        assert "API Key 未配置" in msg, "要带上每个引擎被跳过的原因"
+
+    def test_search_image_returns_empty_when_engines_ran(self, monkeypatch):
+        """
+        回归：不能把「跑了但没匹配」误判成「没有可用引擎」。
+        计数器必须记在「构造成功」而不是「search() 成功」——
+        否则网络失败也会被当成没有可用引擎。
+        """
+        import imgsearch.cli as cli
+
+        class NoMatch:
+            def search(self, path):
+                return []
+
+        class Store:
+            def get_enabled(self):
+                return [FakeConfig("ok", "OK")]
+
+            def build_engine(self, ec, proxies=None):
+                return NoMatch()
+
+        monkeypatch.setattr(cli, "get_store", lambda: Store())
+        monkeypatch.setattr(cli, "_resolve_proxies", lambda: None)
+        monkeypatch.setattr(cli.time, "sleep", lambda s: None)
+        assert cli.search_image("/tmp/x.jpg") == []
+
+    def test_engine_that_built_but_failed_still_counts_as_usable(self, monkeypatch):
+        """构造成功、但 search() 抛网络错 —— 仍算「有可用引擎」"""
+        import imgsearch.cli as cli
+
+        class NetFail:
+            def search(self, path):
+                raise ConnectionError("连不上")
+
+        class Store:
+            def get_enabled(self):
+                return [FakeConfig("ok", "OK")]
+
+            def build_engine(self, ec, proxies=None):
+                return NetFail()
+
+        monkeypatch.setattr(cli, "get_store", lambda: Store())
+        monkeypatch.setattr(cli, "_resolve_proxies", lambda: None)
+        # 不应抛 EngineNotFoundError（引擎是好的，只是请求失败）
+        assert cli.search_image("/tmp/x.jpg") == []

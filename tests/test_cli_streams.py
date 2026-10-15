@@ -156,9 +156,33 @@ class TestBatchPreloadsBeforeRedirect:
         assert report.searched == 1
 
 
-class _FakeEngineStore:
-    def get_enabled(self):
+class _FakeConfig:
+    name = "fake"
+    display_name = "Fake"
+
+    def get(self, key, default=None):
+        return default
+
+
+class _FakeEngine:
+    """够用的替身：run_batch 会问它额度与请求间隔"""
+
+    def quota_state(self):
         return []
 
+    def request_interval(self):
+        return 0.0
+
+
+class _FakeEngineStore:
+    """
+    ⚠️ 必须至少给一个可用引擎：run_batch 现在会在开跑前确认「确实有引擎能用」，
+    否则一张都不跑直接返回 stopped="no_engine"（这是刻意的，
+    免得 389 张逐张失败、日志里 389 行同样的话）。
+    """
+
+    def get_enabled(self):
+        return [_FakeConfig()]
+
     def build_engine(self, config):
-        raise KeyError(config)
+        return _FakeEngine()

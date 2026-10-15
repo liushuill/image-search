@@ -410,6 +410,11 @@ def search_image(image_path: str, engine: str = "auto",
     fallback = None            # (超出阈值的幅度, 结果, 引擎)
     warned_offline = False
     sent_to_network = False
+    # 「跑了但没有匹配」和「根本没跑起来」是两件事，最终提示必须能区分。
+    # 前者返回空列表即可，后者必须报错 —— 否则用户看到「未找到匹配结果」，
+    # 会以为是这张图搜不到，实际是引擎没配置好。
+    usable_engines = 0
+    skipped: List[str] = []
 
     for ec in engine_order:
         # 只有「上一次真的把请求发到了服务器」才需要等间隔
@@ -432,12 +437,17 @@ def search_image(image_path: str, engine: str = "auto",
             print(f"  🌐 正在使用 {ec.display_name} 搜索...")
             # 参数与类型由引擎的 CONFIG_SCHEMA 决定，此处不再逐字段拼装
             eng = store.build_engine(ec, proxies=proxies)
+            # 构造成功 = 这个引擎确实可用（凭据齐备、模块可解析）。
+            # 计数器在这里加，而不是等 search() 成功 —— 否则「能跑但网络失败」
+            # 会被误判成「没有可用引擎」。
+            usable_engines += 1
             results = eng.search(image_path)
             sent_to_network = True
         except Exception as e:
             if target != "auto":
                 raise
             lines = [ln for ln in str(e).strip().splitlines() if ln.strip()]
+            skipped.append(f"{ec.display_name}：{lines[0] if lines else e}")
             print(f"  ⚠️ 跳过 {ec.display_name}：{lines[0] if lines else e}")
             for line in lines[1:]:
                 print(f"     {line}")
@@ -470,6 +480,19 @@ def search_image(image_path: str, engine: str = "auto",
         margin = best - threshold
         if fallback is None or margin > fallback[0]:
             fallback = (margin, results, ec)
+
+    # 一个引擎都没能跑起来 —— 这不是「没搜到」，而是「没搜成」。
+    # 不区分的话，用户看到「未找到匹配结果」会以为这张图搜不到，
+    # 实际是引擎压根没配置好（实测过：唯一启用的引擎缺 Key 时就是这样）。
+    if usable_engines == 0:
+        detail = "\n".join(f"   · {line}" for line in skipped) \
+            or "   · （没有启用任何引擎）"
+        raise EngineNotFoundError(
+            "没有任何可用的搜索引擎，本次并未真正发起搜索。\n"
+            f"{detail}\n"
+            "  · 查看引擎状态与缺口： imgsearch engines list\n"
+            "  · 补填凭据：图形界面的「凭据」页，或 imgsearch config set <键> <值>"
+        )
 
     if fallback is not None:
         _, results, ec = fallback

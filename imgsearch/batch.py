@@ -320,6 +320,14 @@ def run_batch(directory, *, recursive: bool = True,
     import imgsearch.cli
     imgsearch.cli.search_image          # 触发模块完成导入（属性访问即用途）
 
+    # 开跑前先确认确实有可用引擎 —— 否则会逐张失败 N 次，
+    # 而每张的失败原因完全相同，日志毫无价值（389 张就是 389 行同样的话）。
+    if paths and not any(st.usable for st in engine_statuses(engine_store)):
+        report.stopped = "no_engine"
+        report.stopped_detail = (leading_engine_blocked(engine_store)
+                                 or "没有可用的搜索引擎")
+        return report
+
     # 逐张节流：短期限额（如 SauceNAO 的 4 次/30 秒）是服务端判定的，
     # 连续猛打会在第 5 张就被 429，然后被 auto 循环**静默降级**到弱引擎。
     # 按主引擎声明的间隔放慢，就能让主引擎真的被每一张用到。
