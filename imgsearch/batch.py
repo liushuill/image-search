@@ -25,7 +25,7 @@ import io
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Sequence
 
 from imgsearch.engines.quota import QuotaExceeded
 from imgsearch.service import search_with_cache
@@ -281,6 +281,7 @@ def plan_batch(directory, *, recursive: bool = True,
 
 def run_batch(directory, *, recursive: bool = True,
               limit: Optional[int] = None,
+              paths: Optional[Sequence[str]] = None,
               quota_policy: str = DEFAULT_QUOTA_POLICY,
               engine_store=None,
               on_progress: Optional[Callable[[BatchProgress], None]] = None,
@@ -294,6 +295,8 @@ def run_batch(directory, *, recursive: bool = True,
         directory: 要识别的目录
         recursive: 是否递归子目录
         limit: 本次最多处理多少张
+        paths: **显式指定要处理哪些图**（界面里勾选的结果）。
+            传入时忽略 ``recursive`` 与 ``limit`` —— 用户的选择就是最终决定。
         quota_policy: ``stop`` / ``fallback``，见模块文档
         engine_store: 引擎库（测试可注入）；默认取进程内单例
         on_progress: 每张图处理完回调一次
@@ -308,11 +311,15 @@ def run_batch(directory, *, recursive: bool = True,
     if quota_policy not in QUOTA_POLICIES:
         raise ValueError(f"未知额度策略：{quota_policy}（可用：{', '.join(QUOTA_POLICIES)}）")
 
-    paths = scan_images(directory, recursive=recursive)
-    if limit is not None and limit > 0:
-        paths = paths[:limit]
+    if paths is not None:
+        # 显式清单优先：界面里勾掉的图不该因为"重新扫描"又回来
+        selected = [Path(p) for p in paths]
+    else:
+        selected = scan_images(directory, recursive=recursive)
+        if limit is not None and limit > 0:
+            selected = selected[:limit]
 
-    report = BatchReport(directory=str(directory), total=len(paths))
+    report = BatchReport(directory=str(directory), total=len(selected))
 
     # 先把惰性导入做完，再进入 redirect_stdout —— 否则首次导入发生在
     # 被重定向的 stdout 之下，任何依赖「当前 stdout 是谁」的模块级代码
@@ -322,7 +329,7 @@ def run_batch(directory, *, recursive: bool = True,
 
     # 开跑前先确认确实有可用引擎 —— 否则会逐张失败 N 次，
     # 而每张的失败原因完全相同，日志毫无价值（389 张就是 389 行同样的话）。
-    if paths and not any(st.usable for st in engine_statuses(engine_store)):
+    if selected and not any(st.usable for st in engine_statuses(engine_store)):
         report.stopped = "no_engine"
         report.stopped_detail = (leading_engine_blocked(engine_store)
                                  or "没有可用的搜索引擎")
@@ -359,7 +366,7 @@ def run_batch(directory, *, recursive: bool = True,
         if reason:
             raise QuotaExceeded(reason)
 
-    for index, path in enumerate(paths, 1):
+    for index, path in enumerate(selected, 1):
         if should_stop is not None and should_stop():
             report.stopped = "cancelled"
             break
@@ -415,7 +422,7 @@ def run_batch(directory, *, recursive: bool = True,
             on_record(path, outcome)
 
         if on_progress is not None:
-            on_progress(BatchProgress(index=index, total=len(paths),
+            on_progress(BatchProgress(index=index, total=len(selected),
                                       path=str(path), status=status,
                                       message=message, engine=engine_name))
 

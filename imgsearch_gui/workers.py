@@ -298,12 +298,14 @@ class BatchWorker(QtCore.QThread):
     failed = QtCore.Signal(str)
 
     def __init__(self, directory: str, *, recursive: bool = True,
-                 limit=None, policy: str = "stop", parent=None):
+                 limit=None, policy: str = "stop", paths=None, parent=None):
         super().__init__(parent)
         self.directory = directory
         self.recursive = recursive
         self.limit = limit
         self.policy = policy
+        # 界面上勾选后的最终清单；None 表示由 run_batch 自行扫描目录
+        self.paths = list(paths) if paths is not None else None
         self._stop = False
 
     def cancel(self) -> None:
@@ -321,6 +323,7 @@ class BatchWorker(QtCore.QThread):
                 self.directory,
                 recursive=self.recursive,
                 limit=self.limit,
+                paths=self.paths,
                 quota_policy=self.policy,
                 on_progress=self.progress.emit,
                 should_stop=lambda: self._stop,

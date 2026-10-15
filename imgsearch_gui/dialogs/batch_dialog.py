@@ -59,6 +59,39 @@ class BatchDialog(QtWidgets.QDialog):
         pl.addWidget(self.plan_label)
         outer.addWidget(plan_box)
 
+        # ── 图片清单（可勾选排除）──
+        # 只看数量没法判断"这次会跑哪些" —— 尤其目录里混着不想处理的图时。
+        list_box = QtWidgets.QGroupBox("要处理哪些图（取消勾选可跳过）")
+        lb = QtWidgets.QVBoxLayout(list_box)
+
+        tools = QtWidgets.QHBoxLayout()
+        self.filter_edit = QtWidgets.QLineEdit()
+        self.filter_edit.setPlaceholderText("按文件名筛选…")
+        self.filter_edit.textChanged.connect(self._apply_filter)
+        tools.addWidget(self.filter_edit, 1)
+
+        for label, slot in (("全选", lambda: self._check_all(True)),
+                            ("全不选", lambda: self._check_all(False)),
+                            ("反选", self._invert)):
+            btn = QtWidgets.QPushButton(label)
+            btn.setMaximumWidth(72)
+            btn.clicked.connect(slot)
+            tools.addWidget(btn)
+        lb.addLayout(tools)
+
+        self.file_list = QtWidgets.QListWidget()
+        self.file_list.setObjectName("Card")
+        self.file_list.setSelectionMode(
+            QtWidgets.QAbstractItemView.NoSelection)
+        self.file_list.setMinimumHeight(150)
+        self.file_list.itemChanged.connect(self._on_item_changed)
+        lb.addWidget(self.file_list)
+
+        self.selection_label = QtWidgets.QLabel()
+        self.selection_label.setObjectName("FieldHelp")
+        lb.addWidget(self.selection_label)
+        outer.addWidget(list_box)
+
         # ── 选项 ──
         opt = QtWidgets.QGroupBox("本次选项")
         form = QtWidgets.QFormLayout(opt)
@@ -69,6 +102,7 @@ class BatchDialog(QtWidgets.QDialog):
         self.limit.setSuffix(" 张")
         self.limit.setValue(int(get("batch_limit", 20) or 0))
         self.limit.setToolTip("一次最多识别多少张。先跑少量试水更稳妥。")
+        self.limit.valueChanged.connect(self._repopulate)
         form.addRow("本次最多识别", self.limit)
 
         self.policy = QtWidgets.QComboBox()
@@ -85,6 +119,7 @@ class BatchDialog(QtWidgets.QDialog):
 
         self.recursive = QtWidgets.QCheckBox("包含子目录")
         self.recursive.setChecked(bool(get("batch_recursive", True)))
+        self.recursive.toggled.connect(self._repopulate)
         form.addRow("", self.recursive)
 
         pace = QtWidgets.QLabel(
@@ -147,7 +182,88 @@ class BatchDialog(QtWidgets.QDialog):
         self.plan_label.setText("<br>".join(lines))
         self.start_btn.setEnabled(plan.total > 0 and plan.selected > 0)
         if plan.total == 0:
-            self.plan_label.setText(self.plan_label.text() + "\n（目录里没有图片）")
+            self.plan_label.setText(self.plan_label.text() + "<br>（目录里没有图片）")
+        self._populate_files()
+
+    # ── 图片清单 ────────────────────────────────
+
+    def _repopulate(self) -> None:
+        """上限/递归变了 → 清单跟着变（这是「先看清单再决定」的前提）"""
+        if self._worker is None:
+            self.refresh_plan()
+
+    def _populate_files(self) -> None:
+        """按当前目录/递归/上限设置重新填充清单（默认全选）"""
+        from imgsearch.batch import scan_images
+
+        self.file_list.blockSignals(True)
+        self.file_list.clear()
+        try:
+            found = scan_images(self.directory,
+                                recursive=self.recursive.isChecked())
+        except NotADirectoryError:
+            found = []
+
+        limit = self.limit.value()
+        if limit > 0:
+            found = found[:limit]
+
+        for path in found:
+            item = QtWidgets.QListWidgetItem(path.name)
+            item.setData(QtCore.Qt.UserRole, str(path))
+            item.setFlags(item.flags() | QtCore.Qt.ItemIsUserCheckable)
+            item.setCheckState(QtCore.Qt.Checked)
+            item.setToolTip(str(path))
+            self.file_list.addItem(item)
+        self.file_list.blockSignals(False)
+        self._apply_filter()
+        self._update_selection_label()
+
+    def _apply_filter(self) -> None:
+        """筛选只隐藏行，不改勾选状态"""
+        needle = self.filter_edit.text().strip().lower()
+        for i in range(self.file_list.count()):
+            item = self.file_list.item(i)
+            item.setHidden(bool(needle) and needle not in item.text().lower())
+
+    def _visible_items(self) -> list:
+        return [self.file_list.item(i) for i in range(self.file_list.count())
+                if not self.file_list.item(i).isHidden()]
+
+    def _check_all(self, checked: bool) -> None:
+        """只影响当前可见项 —— 筛选后点「全选」不会误选被隐藏的"""
+        self.file_list.blockSignals(True)
+        for item in self._visible_items():
+            item.setCheckState(QtCore.Qt.Checked if checked else QtCore.Qt.Unchecked)
+        self.file_list.blockSignals(False)
+        self._update_selection_label()
+
+    def _invert(self) -> None:
+        self.file_list.blockSignals(True)
+        for item in self._visible_items():
+            item.setCheckState(QtCore.Qt.Unchecked
+                               if item.checkState() == QtCore.Qt.Checked
+                               else QtCore.Qt.Checked)
+        self.file_list.blockSignals(False)
+        self._update_selection_label()
+
+    def _on_item_changed(self, _item) -> None:
+        self._update_selection_label()
+
+    def selected_paths(self) -> list:
+        return [self.file_list.item(i).data(QtCore.Qt.UserRole)
+                for i in range(self.file_list.count())
+                if self.file_list.item(i).checkState() == QtCore.Qt.Checked]
+
+    def _update_selection_label(self) -> None:
+        total = self.file_list.count()
+        chosen = len(self.selected_paths())
+        text = f"已勾选 {chosen} / {total} 张"
+        if chosen == 0:
+            text += "　⚠️ 一张都没勾，无法开始"
+        self.selection_label.setText(text)
+        if self._worker is None:
+            self.start_btn.setEnabled(chosen > 0)
 
     # ── 执行 ────────────────────────────────────
 
@@ -163,12 +279,14 @@ class BatchDialog(QtWidgets.QDialog):
         self.limit.setEnabled(False)
         self.policy.setEnabled(False)
         self.recursive.setEnabled(False)
-        self.log.appendPlainText(f"开始识别：{self.directory}")
+        self.log.appendPlainText(
+            f"开始识别：{self.directory}（已勾选 {len(self.selected_paths())} 张）")
 
         worker = BatchWorker(
             self.directory,
             recursive=self.recursive.isChecked(),
             limit=limit,
+            paths=self.selected_paths(),
             policy=self.policy.currentData() or "stop",
         )
         worker.progress.connect(self._on_progress)

@@ -9,8 +9,20 @@ from PySide6 import QtCore, QtGui, QtWidgets
 from imgsearch.engines.base import SearchResult
 from imgsearch_gui import style
 
-COLUMNS = ["相似度", "引擎", "Pixiv ID", "画师", "标题 / 作品", "站点 ID", "来源链接"]
-COL_SIM, COL_ENGINE, COL_PIXIV, COL_ARTIST, COL_TITLE, COL_IDS, COL_URL = range(7)
+COLUMNS = ["预览", "相似度", "引擎", "Pixiv ID", "画师", "标题 / 作品",
+           "站点 ID", "来源链接"]
+(COL_THUMB, COL_SIM, COL_ENGINE, COL_PIXIV, COL_ARTIST,
+ COL_TITLE, COL_IDS, COL_URL) = range(8)
+
+# 缩略图显示边长与行高
+THUMB_SIZE = 72
+ROW_HEIGHT = THUMB_SIZE + 14
+
+# 图源缩略图取不到时的占位说明。
+# ⚠️ 不是所有图源都能取：SauceNAO 的缩略图链接带 ?auth=… 令牌，
+# **当场取有效、过一会儿再取会 403**（实测）。所以历史记录里的旧链接
+# 注定失败 —— 这时给一个明确说明，而不是空白让人以为坏掉了。
+THUMB_FAILED = "取不到\n（链接已过期）"
 
 
 def site_ids(r: SearchResult) -> str:
@@ -53,9 +65,35 @@ def result_urls(results: List[SearchResult]) -> List[str]:
 class ResultTable(QtWidgets.QTableWidget):
     """展示 SearchResult 列表"""
 
+    def _init_thumbnails(self) -> None:
+        """缩略图：后台加载 + 按图源去重 + 记住已到的图"""
+        from imgsearch_gui.widgets.thumbnails import ThumbnailLoader, stable_url_key
+
+        self._stable_key = stable_url_key
+        self._thumbs = ThumbnailLoader(self)
+        self._thumbs.ready.connect(self._on_thumb)
+        self._thumbs.failed.connect(self._on_thumb_failed)
+        self._thumb_labels: dict = {}      # key -> [QLabel, ...]
+        self._pixmaps: dict = {}           # key -> QPixmap（后注册的能立刻拿到）
+        self._pending: set = set()
+
+    def _on_thumb(self, key: str, pixmap) -> None:
+        self._pixmaps[key] = pixmap
+        self._pending.discard(key)
+        for label in self._thumb_labels.get(key, []):
+            label.setPixmap(pixmap)
+            label.setText("")
+
+    def _on_thumb_failed(self, key: str) -> None:
+        self._pending.discard(key)
+        for label in self._thumb_labels.get(key, []):
+            label.setText(THUMB_FAILED)
+            label.setStyleSheet(f"color:{style.MUTED};font-size:11px;")
+
     def __init__(self, parent=None):
         super().__init__(0, len(COLUMNS), parent)
         self.setHorizontalHeaderLabels(COLUMNS)
+        self._init_thumbnails()
         self.setEditTriggers(QtWidgets.QAbstractItemView.NoEditTriggers)
         self.setSelectionBehavior(QtWidgets.QAbstractItemView.SelectRows)
         self.setSelectionMode(QtWidgets.QAbstractItemView.ExtendedSelection)
@@ -81,10 +119,13 @@ class ResultTable(QtWidgets.QTableWidget):
 
     def set_results(self, results: List[SearchResult]) -> None:
         self._results = list(results)
+        # 清掉上一批的标签登记（图还在 _pixmaps 里，重复出现时无需再取）
+        self._thumb_labels = {}
         self.setRowCount(0)
         for r in self._results:
             row = self.rowCount()
             self.insertRow(row)
+            self._set_thumb_cell(row, r)
 
             sim = QtWidgets.QTableWidgetItem(f"{r.similarity:.1f}%")
             sim.setTextAlignment(QtCore.Qt.AlignRight | QtCore.Qt.AlignVCenter)
@@ -119,6 +160,37 @@ class ResultTable(QtWidgets.QTableWidget):
             self.setItem(row, COL_URL, link)
 
         self.resizeRowsToContents()
+        # 缩略图列需要固定行高（resizeRowsToContents 会把它压扁）
+        for row in range(self.rowCount()):
+            self.setRowHeight(row, max(ROW_HEIGHT, self.rowHeight(row)))
+
+    def _set_thumb_cell(self, row: int, r: SearchResult) -> None:
+        """把缩略图放进单元格（先放占位，图到了再替换）"""
+        label = QtWidgets.QLabel()
+        label.setAlignment(QtCore.Qt.AlignCenter)
+        label.setFixedSize(THUMB_SIZE, THUMB_SIZE)
+
+        url = (r.thumbnail or "").strip()
+        if not url:
+            label.setText("—")
+            label.setToolTip("该引擎没有提供缩略图")
+            label.setStyleSheet(f"color:{style.MUTED};")
+        else:
+            key = self._stable_key(url)
+            # 先查已到的图，避免重复设置时闪一下占位
+            cached = self._pixmaps.get(key)
+            if cached is not None:
+                label.setPixmap(cached)
+            elif key in self._pending:
+                label.setText("…")
+            else:
+                label.setText("…")
+                self._pending.add(key)
+                self._thumbs.request(key, url=url)
+            self._thumb_labels.setdefault(key, []).append(label)
+            label.setToolTip(url)
+
+        self.setCellWidget(row, COL_THUMB, label)
 
     def results(self) -> List[SearchResult]:
         return list(self._results)

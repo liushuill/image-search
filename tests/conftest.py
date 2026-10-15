@@ -136,8 +136,18 @@ def library():
 
 @pytest.fixture(scope="session")
 def qapp():
-    """整个测试会话共用一个 QApplication（Qt 只允许存在一个）"""
+    """
+    整个测试会话共用一个 QApplication（Qt 只允许存在一个）。
+
+    ⚠️ 收尾必须停掉所有后台缩略图线程。pytest 不会让 QApplication 走
+    正常退出流程，因此 aboutToQuit 收不到；而 QThread 在还在跑的时候被
+    销毁，Qt 会直接 abort 整个进程（表现为 pytest exit 134 + 一大段
+    "Extension modules:" 的崩溃转储，很难看出真正原因）。
+    """
     pytest.importorskip("PySide6")
     from imgsearch_gui.app import create_app
     app = create_app([])
     yield app
+
+    from imgsearch_gui.widgets.thumbnails import stop_all_loaders
+    stop_all_loaders()

@@ -357,6 +357,48 @@ class LibraryStore:
 
     # ── 统计 ────────────────────────────────────
 
+    def list_images(self, *, root_id: Optional[int] = None,
+                    only_missing: bool = False, search: str = "",
+                    only_resolved: bool = False,
+                    limit: Optional[int] = None,
+                    offset: int = 0) -> List[ImageRecord]:
+        """
+        列出图库里的图片（供「浏览图库」用）。
+
+        Args:
+            root_id: 限定某条已登记路径
+            only_missing: 只看文件已不在原位置的
+            search: 按文件名或 dHash 模糊匹配（大小写不敏感）
+            only_resolved: 只看已有搜索结果的
+            limit/offset: 分页；``limit=None`` 表示全部
+
+        ⚠️ 这里只返回**记录**，不碰磁盘内容 —— 缩略图由界面按需异步生成，
+        否则几百上千张会把调用方卡住。
+        """
+        where, params = [], []
+        if root_id is not None:
+            where.append("i.root_id = ?")
+            params.append(root_id)
+        if only_missing:
+            where.append("i.missing = 1")
+        if search:
+            where.append("(LOWER(i.abs_path) LIKE ? OR LOWER(i.dhash) LIKE ?)")
+            needle = f"%{search.strip().lower()}%"
+            params.extend([needle, needle])
+        if only_resolved:
+            where.append("EXISTS (SELECT 1 FROM results r WHERE r.image_id = i.id)")
+
+        sql = "SELECT i.* FROM images i"
+        if where:
+            sql += " WHERE " + " AND ".join(where)
+        # 最近的排在前面：用户通常刚从这批图里搜过
+        sql += " ORDER BY i.last_seen DESC, i.id DESC"
+        if limit is not None:
+            sql += " LIMIT ? OFFSET ?"
+            params.extend([int(limit), int(offset)])
+
+        return [self._row_to_image(row) for row in self.db.query(sql, tuple(params))]
+
     def count_images(self, root_id: Optional[int] = None, only_missing: bool = False) -> int:
         sql = "SELECT COUNT(*) FROM images"
         where, params = [], []
