@@ -125,10 +125,20 @@ class CleanupPage(QtWidgets.QWidget):
         )
         sl.addWidget(self.cb_results)
 
-        self.cb_thumbs = QtWidgets.QCheckBox("缓存缩略图")
+        self.cb_thumbs = QtWidgets.QCheckBox("本地图缩略图")
         self.cb_thumbs.toggled.connect(self._invalidate)
         self.cb_thumbs.setToolTip("为预览与报告生成的图片副本，通常不影响功能。")
         sl.addWidget(self.cb_thumbs)
+
+        self.cb_url_thumbs = QtWidgets.QCheckBox("图源缩略图缓存")
+        self.cb_url_thumbs.toggled.connect(self._invalidate)
+        self.cb_url_thumbs.setToolTip(
+            "从搜索引擎给的链接下载的匹配图缩略图。\n\n"
+            "这是整套缓存里唯一会无界增长的东西 —— 每看一次新图的结果就多几条，\n"
+            "所以有容量上限（在「设置」页可调）并按最久未用自动淘汰。"
+            "清掉不影响搜索，只是历史结果的预览要重新联网取（且旧链接可能已失效）。"
+        )
+        sl.addWidget(self.cb_url_thumbs)
 
         self.cb_images = QtWidgets.QCheckBox("图片记录（会连同结果与缩略图一起删）")
         self.cb_images.setToolTip(
@@ -244,8 +254,10 @@ class CleanupPage(QtWidgets.QWidget):
         stats, roots = self._with_library(build)
 
         self.card_db.value_label.setText(format_bytes(stats.db_bytes))
+        # 两类缩略图并在一张卡里显示，但分开写清楚 —— 它们的清理方式不同
         self.card_thumbs.value_label.setText(
-            f"{stats.thumbs_total} 个 · {format_bytes(stats.thumbs_bytes)}"
+            f"本地图 {stats.thumbs_total} 个 · {format_bytes(stats.thumbs_bytes)}\n"
+            f"图源 {stats.url_thumbs} 个 · {format_bytes(stats.url_thumbs_bytes)}"
         )
         self.card_total.value_label.setText(format_bytes(stats.total_bytes))
         self.card_orphan.value_label.setText(
@@ -321,6 +333,7 @@ class CleanupPage(QtWidgets.QWidget):
             root_id=root_id,
             results=self.cb_results.isChecked() or self.cb_images.isChecked(),
             thumbs=self.cb_thumbs.isChecked(),
+            url_thumbs=self.cb_url_thumbs.isChecked(),
             images=self.cb_images.isChecked(),
         )
 

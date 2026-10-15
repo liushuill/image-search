@@ -194,10 +194,17 @@ class TestThumbnailLoader:
         assert stable_url_key(base) == base
 
     def test_same_cache_path_for_rotating_token(self):
-        from imgsearch_gui.widgets.thumbnails import _url_cache_path
-        a = _url_cache_path("https://x/y.jpg?auth=1")
-        b = _url_cache_path("https://x/y.jpg?auth=2")
-        assert a == b
+        """存储归核心层管（清理页也在核心层，不能反向依赖 Qt）"""
+        from imgsearch.library.thumbs import url_thumb_path
+        assert url_thumb_path("https://x/y.jpg?auth=1") == \
+            url_thumb_path("https://x/y.jpg?auth=2")
+
+    def test_gui_loader_delegates_storage_to_core(self):
+        """界面模块不该自己实现缓存路径 —— 否则与清理页看到的两套"""
+        import imgsearch_gui.widgets.thumbnails as mod
+        assert not hasattr(mod, "_url_cache_path")
+        assert mod.url_thumb_path is __import__(
+            "imgsearch.library.thumbs", fromlist=["x"]).url_thumb_path
 
     def test_loader_starts_thread_lazily(self, qapp):
         """构造加载器不该起线程 —— 否则忘了收尾的地方会 abort 整个进程"""

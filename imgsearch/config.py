@@ -64,6 +64,10 @@ _DEFAULT_CONFIG = {
     "cache_thumbnails": True,
     # 批量识别（见下方 _BATCH_DEFAULTS 的说明）
     **_BATCH_DEFAULTS,
+    # 图源缩略图缓存的上限（MB）；0 = 不限制。
+    # 这是整套缓存里唯一会无界增长的东西 —— 每看一次新图的结果就多几条，
+    # 所以给一个默认上限并按「最久未用」淘汰。
+    "url_thumb_cache_mb": 100,
 }
 
 _config = None

@@ -23,7 +23,8 @@ SQLite 删除行之后**数据库文件不会自动缩小** —— 空间只是�
 
 import sqlite3
 from dataclasses import dataclass, field
-from typing import List, Optional, Set
+from pathlib import Path
+from typing import Iterable, List, Optional, Set
 
 from imgsearch.library import thumbs
 from imgsearch.library.db import LibraryDB
@@ -69,10 +70,14 @@ class LibraryStats:
     thumbs_bytes: int = 0
     orphan_thumbs: int = 0
     orphan_thumbs_bytes: int = 0
+    # 图源缩略图缓存（从搜索引擎链接下载的那批）。
+    # 它按 URL 索引、与根路径无关，因此不参与按路径的统计。
+    url_thumbs: int = 0
+    url_thumbs_bytes: int = 0
 
     @property
     def total_bytes(self) -> int:
-        return self.db_bytes + self.thumbs_bytes
+        return self.db_bytes + self.thumbs_bytes + self.url_thumbs_bytes
 
 
 def _format_bytes(n: int) -> str:
@@ -100,6 +105,41 @@ def known_dhashes(db: LibraryDB, root_id: Optional[int] = None) -> Set[str]:
             (root_id,),
         )
     return {r["dhash"] for r in rows}
+
+
+def _url_thumbs_for(db: LibraryDB, root_id: Optional[int]) -> List[Path]:
+    """
+    本次范围内的图源缩略图缓存文件。
+
+    图源缓存按 URL 索引、与根路径无直接关系，所以要**从结果记录里反查**：
+    先把该范围内所有 `results.thumbnail` 取出来，再映射成缓存路径。
+    ⚠️ 因此必须在删除结果行**之前**调用。
+    """
+    if root_id is None:
+        return thumbs.iter_url_files()
+
+    rows = db.query(
+        "SELECT DISTINCT r.thumbnail FROM results r"
+        " JOIN images i ON i.id = r.image_id"
+        " WHERE i.root_id = ? AND r.thumbnail IS NOT NULL AND r.thumbnail != ''",
+        (root_id,),
+    )
+    found = []
+    for row in rows:
+        path = thumbs.url_thumb_path(row["thumbnail"])
+        if path.is_file():
+            found.append(path)
+    return found
+
+
+def _total_size(paths: Iterable[Path]) -> int:
+    total = 0
+    for p in paths:
+        try:
+            total += p.stat().st_size
+        except OSError:
+            pass
+    return total
 
 
 def _thumbs_stats_for(dhashes: Set[str]) -> tuple:
@@ -144,6 +184,9 @@ def collect_stats(db: LibraryDB, store: LibraryStore) -> LibraryStats:
     t = thumbs.stats()
     stats.thumbs_total = t["count"]
     stats.thumbs_bytes = t["bytes"]
+    u = thumbs.url_stats()
+    stats.url_thumbs = u["count"]
+    stats.url_thumbs_bytes = u["bytes"]
 
     # 孤立缩略图：数据库里已经没有对应记录，却还留在磁盘上
     all_known = known_dhashes(db)
@@ -181,10 +224,12 @@ class PurgeOptions:
     root_id: Optional[int] = None
     results: bool = False
     thumbs: bool = False
+    url_thumbs: bool = False
     images: bool = False
 
     def is_empty(self) -> bool:
-        return not (self.results or self.thumbs or self.images)
+        return not (self.results or self.thumbs or self.url_thumbs
+                    or self.images)
 
 
 @dataclass
@@ -196,11 +241,13 @@ class PurgePlan:
     results: int = 0
     thumbs: int = 0
     thumbs_bytes: int = 0
+    url_thumbs: int = 0
+    url_thumbs_bytes: int = 0
     db_bytes_before: int = 0
 
     @property
     def estimated_free_bytes(self) -> int:
-        return self.thumbs_bytes
+        return self.thumbs_bytes + self.url_thumbs_bytes
 
     def describe(self) -> str:
         scope = "全部路径" if self.options.root_id is None else f"路径 id={self.options.root_id}"
@@ -210,7 +257,10 @@ class PurgePlan:
         elif self.options.results:
             lines.append(f"  · 搜索结果：{self.results} 条（图片记录保留）")
         if self.options.thumbs:
-            lines.append(f"  · 缓存缩略图：{self.thumbs} 个（{_format_bytes(self.thumbs_bytes)}）")
+            lines.append(f"  · 本地图缩略图：{self.thumbs} 个（{_format_bytes(self.thumbs_bytes)}）")
+        if self.options.url_thumbs:
+            lines.append(f"  · 图源缩略图缓存：{self.url_thumbs} 个"
+                         f"（{_format_bytes(self.url_thumbs_bytes)}）")
         lines.append(f"  · 当前数据库文件：{_format_bytes(self.db_bytes_before)}"
                      f"（清理后会自动 VACUUM 回收）")
         return "\n".join(lines)
@@ -223,6 +273,7 @@ class PurgeResult:
     images_removed: int = 0
     results_removed: int = 0
     thumbs_removed: int = 0
+    url_thumbs_removed: int = 0
     db_bytes_before: int = 0
     db_bytes_after: int = 0
 
@@ -237,7 +288,9 @@ class PurgeResult:
         if self.results_removed:
             lines.append(f"  已删除搜索结果：{self.results_removed} 条")
         if self.thumbs_removed:
-            lines.append(f"  已删除缩略图：{self.thumbs_removed} 个")
+            lines.append(f"  已删除本地图缩略图：{self.thumbs_removed} 个")
+        if self.url_thumbs_removed:
+            lines.append(f"  已删除图源缩略图缓存：{self.url_thumbs_removed} 个")
         lines.append(f"  数据库文件：{_format_bytes(self.db_bytes_before)}"
                      f" → {_format_bytes(self.db_bytes_after)}"
                      f"（回收 {_format_bytes(self.db_bytes_freed)}）")
@@ -267,6 +320,11 @@ def plan_purge(db: LibraryDB, store: LibraryStore,
             dhashes = {f.stem for f in thumbs.iter_files()}
         plan.thumbs, plan.thumbs_bytes = _thumbs_stats_for(dhashes)
 
+    if options.url_thumbs:
+        paths = _url_thumbs_for(db, root_id)
+        plan.url_thumbs = len(paths)
+        plan.url_thumbs_bytes = _total_size(paths)
+
     return plan
 
 
@@ -284,10 +342,14 @@ def execute_purge(db: LibraryDB, store: LibraryStore,
     root_id = options.root_id
     result = PurgeResult(db_bytes_before=db.size_on_disk())
 
-    # 1) 删记录前先记下涉及的 dHash
+    # 1) 删记录前先记下涉及的 dHash 与图源缓存路径
+    #    （两者都要从记录里反查，删完就查不到了）
     dhashes: Set[str] = set()
     if options.thumbs and (options.images or options.results):
         dhashes = known_dhashes(db, root_id)
+    url_thumb_paths: List[Path] = []
+    if options.url_thumbs:
+        url_thumb_paths = _url_thumbs_for(db, root_id)
 
     # 2) 删数据库行
     with db.transaction():
@@ -317,6 +379,17 @@ def execute_purge(db: LibraryDB, store: LibraryStore,
             result.thumbs_removed = thumbs.remove_many(dhashes)
         else:
             result.thumbs_removed = thumbs.purge_all()
+
+    # 3b) 图源缩略图缓存（路径已在删记录之前收集好）
+    if options.url_thumbs:
+        removed = 0
+        for path in url_thumb_paths:
+            try:
+                path.unlink()
+                removed += 1
+            except OSError:
+                pass
+        result.url_thumbs_removed = removed
 
     # 4) 真正把空间还回磁盘
     if result.images_removed or result.results_removed:

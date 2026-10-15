@@ -153,6 +153,25 @@ class SettingsPage(QtWidgets.QWidget):
         self.batch_recursive = QtWidgets.QCheckBox("包含子目录")
         blay.addWidget(self.batch_recursive)
 
+        self.url_cache_mb = QtWidgets.QSpinBox()
+        self.url_cache_mb.setRange(0, 100000)
+        self.url_cache_mb.setSpecialValueText("不限制")
+        self.url_cache_mb.setSuffix(" MB")
+        self.url_cache_mb.setToolTip(
+            "图源缩略图缓存的上限（0 = 不限制）。\n"
+            "超出后按「最久未用」自动淘汰。\n\n"
+            "这是唯一会无界增长的东西：每看一次新图的结果就多几条，"
+            "所以默认给 100 MB。\n"
+            "也可以在「清理」页手动清空。"
+        )
+        row3 = QtWidgets.QHBoxLayout()
+        row3.addWidget(QtWidgets.QLabel("图源缩略图缓存上限："))
+        row3.addWidget(self.url_cache_mb)
+        row3.addStretch(1)
+        holder3 = QtWidgets.QWidget()
+        holder3.setLayout(row3)
+        blay.addWidget(holder3)
+
         note = QtWidgets.QLabel(
             "批量识别会<b>先查缓存</b>：已识别过的图直接跳过、不消耗配额，"
             "因此随时中断、分几天跑都可以。"
@@ -213,6 +232,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.batch_policy.setCurrentIndex(idx if idx >= 0 else 0)
         self.batch_limit.setValue(int(get("batch_limit", 20) or 0))
         self.batch_recursive.setChecked(bool(get("batch_recursive", True)))
+        self.url_cache_mb.setValue(int(get("url_thumb_cache_mb", 100) or 0))
         self.message.setText("")
         self.proxy_result.setText("")
 
@@ -226,6 +246,7 @@ class SettingsPage(QtWidgets.QWidget):
             batch_quota_policy=self.batch_policy.currentData(),
             batch_limit=self.batch_limit.value(),
             batch_recursive=self.batch_recursive.isChecked(),
+            url_thumb_cache_mb=self.url_cache_mb.value(),
         )
         self.message.setStyleSheet(f"color:{style.OK};")
         self.message.setText("✅ 已保存。引擎页的「代理」下拉会按新的全局设置生效。")

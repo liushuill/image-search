@@ -17,7 +17,6 @@
 - 远程 URL：存到 `data/cache/urlthumbs/`，按 URL 哈希命名
 """
 
-import hashlib
 import queue
 import threading
 import weakref
@@ -26,9 +25,9 @@ from typing import Optional
 
 from PySide6 import QtCore
 
-from imgsearch.config import CACHE_DIR
-
-URL_THUMB_DIR = CACHE_DIR / "urlthumbs"
+# 缩略图的存储与淘汰都归核心层管（清理页也在核心层，不能反向依赖 Qt）
+from imgsearch.library import thumbs as thumb_store
+from imgsearch.library.thumbs import url_thumb_path
 
 # 所有活着的加载器。用于在退出/测试收尾时统一停线程 ——
 # QThread 还在跑就被销毁，Qt 会直接 abort 整个进程（实测 exit 134）。
@@ -92,14 +91,21 @@ class _ThumbWorker(QtCore.QThread):
     @staticmethod
     def _produce(spec: dict) -> Optional[bytes]:
         if spec.get("kind") == "url":
-            cached = _url_cache_path(spec["url"])
+            cached = url_thumb_path(spec["url"])
             if cached.is_file():
+                try:
+                    # 触碰访问时间：LRU 淘汰靠它判断"最久未用"
+                    cached.touch()
+                except OSError:
+                    pass
                 return cached.read_bytes()
             data = _download(spec["url"])
             if data is None:
                 return None
             try:
-                _url_cache_path(spec["url"]).write_bytes(data)
+                cached.parent.mkdir(parents=True, exist_ok=True)
+                cached.write_bytes(data)
+                _maybe_trim()
             except OSError:
                 pass
             return data
@@ -181,29 +187,27 @@ def _fetch(url: str, proxies, timeout: int) -> Optional[bytes]:
         return None
 
 
+# 写入多少个新文件后检查一次容量上限。
+# 每写一次都全目录扫描太浪费；攒一批再查，最多超出十几个文件（几十 KB），可忽略。
+_TRIM_EVERY = 16
+_writes_since_trim = 0
+
+
+def _maybe_trim() -> None:
+    global _writes_since_trim
+    _writes_since_trim += 1
+    if _writes_since_trim >= _TRIM_EVERY:
+        _writes_since_trim = 0
+        try:
+            thumb_store.trim_url_cache()
+        except Exception:                                 # noqa: BLE001
+            pass
+
+
 def stable_url_key(url: str) -> str:
-    """
-    URL 的稳定标识（去掉查询串）。
-
-    用于两件事：磁盘缓存的命名、以及界面上「同一个图源只请求一次」的去重。
-    """
-    return url.split("?", 1)[0].split("#", 1)[0]
-
-
-def _url_cache_path(url: str) -> Path:
-    """
-    缓存位置：**按去掉查询串的 URL** 命名。
-
-    ⚠️ 这是必需的，不是优化。实测：
-      · 刚搜到的缩略图 URL 直连 200
-      · 过了一会儿再用同一个 URL 取 → 403
-    说明 `?auth=…&exp=…` 这类令牌会失效；而路径部分
-    （…/<hash>_0.jpg）是稳定的。按稳定部分做键，
-    重新搜索同一张图就能命中缓存，不必再下一次。
-    """
-    URL_THUMB_DIR.mkdir(parents=True, exist_ok=True)
-    digest = hashlib.sha1(stable_url_key(url).encode("utf-8")).hexdigest()
-    return URL_THUMB_DIR / f"{digest}.img"
+    """URL 的稳定标识（转发核心实现，界面做「同一图源只请求一次」的去重）"""
+    from imgsearch.library.thumbs import stable_url_key as _key
+    return _key(url)
 
 
 class ThumbnailLoader(QtCore.QObject):
