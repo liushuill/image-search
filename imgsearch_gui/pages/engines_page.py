@@ -327,7 +327,9 @@ class EnginesPage(QtWidgets.QWidget):
             "状态：" + ("已启用" if ec.enabled else "已禁用"),
         ]
         # 凭据需求（统一模板里每个引擎都必须声明 AUTH_MODE）
-        mode = getattr(cls, "AUTH_MODE", "") if cls is not None else ""
+        # ⚠️ 用 auth_mode_for(配置)：适配器的凭据需求由实例配置决定，
+        # 读类属性会把 danbooru（basic）显示成「无需凭据」
+        mode = cls.auth_mode_for(ec.settings) if cls is not None else ""
         if mode:
             bits.append("凭据：" + {"required": "必须", "optional": "可选",
                                     "none": "无需"}.get(mode, mode))
@@ -337,8 +339,10 @@ class EnginesPage(QtWidgets.QWidget):
             bits.append("⚠️ 引擎类当前无法解析，下列为已保存的值")
         self.detail_meta.setText("　·　".join(bits))
 
-        # 使用须知单独一行：它通常较长，混在「·」分隔的一行里会读不动
-        usage = (getattr(cls, "USAGE_NOTE", "") or "") if cls is not None else ""
+        # 使用须知单独一行：它通常较长，混在「·」分隔的一行里会读不动。
+        # 用 ec.usage_note —— 配置预设（danbooru）的注意事项在预设里，
+        # 而不在它现在用的适配器类上
+        usage = ec.usage_note
         self.usage_label.setText(f"ℹ️ {usage}" if usage else "")
         self.usage_label.setVisible(bool(usage))
 

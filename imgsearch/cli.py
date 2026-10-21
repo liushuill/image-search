@@ -1262,8 +1262,8 @@ def _print_engine_list(store: EngineStore) -> None:
 
 def _engine_note(e: EngineConfig) -> str:
     """一行备注：把「为什么不能用」直接摆出来，而不是等搜索时才报错"""
-    cls = resolve_engine_class(e)
-    usage = (getattr(cls, "USAGE_NOTE", "") or "") if cls is not None else ""
+    # 用配置上的 note：配置预设（如 danbooru）的注意事项在预设里，不在适配器类上
+    usage = e.usage_note or ""
     if not e.enabled and usage:
         # 停用的引擎也给提示 —— 想启用的人需要先知道前提条件
         first = usage.split("。", 1)[0]

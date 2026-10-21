@@ -168,6 +168,25 @@ class DeclarativeEngine(SearchEngine):
     # 子类声明自己的响应类型，仅用于日志与提示
     RESPONSE_KIND = "json"
 
+    @classmethod
+    def auth_mode_for(cls, settings: dict = None) -> str:
+        """
+        适配器的凭据需求由**实例配置**决定：
+
+            auth_mode = none        → 无需凭据
+            auth_mode = query/basic → 必须凭据
+
+        否则同一类挂的多个实例会全都显示成「无需凭据」。
+        """
+        data = settings or {}
+        mode = str(data.get("auth_mode", "none") or "none").strip().lower()
+        return "required" if mode in ("query", "basic") else "none"
+
+    def _settings_view(self) -> dict:
+        view = dict(self.options)
+        view.setdefault("auth_mode", str(self.opt("auth_mode", "none") or "none"))
+        return view
+
     # ── 配置读取 ────────────────────────────────
 
     def _endpoint(self) -> str:

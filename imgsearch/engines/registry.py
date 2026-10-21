@@ -137,6 +137,15 @@ def canonical_name(name: str) -> str:
     """
     cls = find_builtin(name)
     if cls is None:
+        # 配置预设（如 danbooru）不再注册成类，但名字归一化仍要工作 ——
+        # 老配置里可能写着 "Danbooru"
+        try:
+            from imgsearch.engines.adapters.presets import by_name
+            preset = by_name(name)
+            if preset is not None:
+                return preset.name
+        except Exception:                                 # noqa: BLE001
+            pass
         return name
     for reg_name, reg_cls in _REGISTRY.items():
         if reg_cls is cls:

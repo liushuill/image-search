@@ -95,14 +95,33 @@ class EngineConfig:
 
     @property
     def is_builtin(self) -> bool:
-        return _registry_is_builtin(self.name)
+        # 配置预设（danbooru）也是内置引擎，只是不再有专属 Python 类
+        if _registry_is_builtin(self.name):
+            return True
+        from imgsearch.engines.adapters.presets import by_name
+        return by_name(self.name) is not None
 
     @property
     def display_name(self) -> str:
+        # 配置预设有自己的显示名（否则会显示成「JSON 适配器」这种类名）
+        from imgsearch.engines.adapters.presets import by_name
+        preset = by_name(self.name)
+        if preset is not None:
+            return preset.display
         cls = resolve_engine_class(self)
         if cls is not None:
             return getattr(cls, "DISPLAY_NAME", "") or self.name
         return self.name
+
+    @property
+    def usage_note(self) -> str:
+        """启用前的注意事项：配置预设优先，其次引擎类自己的 USAGE_NOTE"""
+        from imgsearch.engines.adapters.presets import by_name
+        preset = by_name(self.name)
+        if preset is not None and preset.usage_note:
+            return preset.usage_note
+        cls = resolve_engine_class(self)
+        return getattr(cls, "USAGE_NOTE", "") if cls is not None else ""
 
     def schema(self) -> Schema:
         return schema_for(self)
@@ -122,8 +141,11 @@ class EngineConfig:
                 # SECRET 字段没写 env_var 时按**实例名**派生 ——
                 # 这样同一个适配器类挂多个实例（booruA/booruB）时
                 # 各用各的凭据，不会共用一个 Key。
-                env_name = f.env_var or (
-                    env_var_for(self.name, f) if f.is_secret else "")
+                from imgsearch.engines.adapters.presets import by_name
+                preset = by_name(self.name)
+                env_name = (f.env_var
+                            or (preset.env.get(f.key) if preset else "")
+                            or (env_var_for(self.name, f) if f.is_secret else ""))
                 if env_name:
                     value = secrets.get(env_name, "") or ""
             kwargs[f.key] = value
@@ -427,7 +449,9 @@ class EngineStore:
             if not key or key in seen:
                 continue
             seen.add(key)
-            e.name = canonical_name(e.name) if self.is_builtin(e.name) else e.name
+            # canonical_name 对未知名字原样返回，所以不必先判断 is_builtin ——
+            # 配置预设（danbooru）已不是注册类，但名字仍要归一
+            e.name = canonical_name(e.name)
             deduped.append(e)
         # 升级新增的内置引擎自动补进来
         deduped = self._append_missing_builtins(deduped)
@@ -439,20 +463,36 @@ class EngineStore:
         """
         出厂默认引擎列表。
 
-        顺序取自各引擎声明的 ``DEFAULT_ORDER``。声明了
-        ``ENABLED_BY_DEFAULT = False`` 的引擎（如需要账号的 Danbooru）
-        仍会出现在列表里，但默认关闭 —— 避免开箱跑 `auto` 时一路报「未配置」。
+        内置引擎与「配置预设」按同一个排序种子（DEFAULT_ORDER / preset.order）
+        混排，所以把某个引擎改成预设不会改变它在列表里的位置。
+        声明了 ``ENABLED_BY_DEFAULT = False`` 的引擎仍会出现，但默认关闭 ——
+        避免开箱跑 `auto` 时一路报「未配置」。
         """
         registry.ensure_builtins_loaded()
-        engines: List[EngineConfig] = []
+        from imgsearch.engines.adapters.presets import PRESETS
+
+        entries = []
         for name in registry.ordered_builtin_names():
             cls = registry.find_builtin(name)
-            enabled = bool(getattr(cls, "ENABLED_BY_DEFAULT", True))
-            ec = EngineConfig(name=name, enabled=enabled, priority=len(engines) + 1)
+            ec = EngineConfig(
+                name=name, enabled=bool(getattr(cls, "ENABLED_BY_DEFAULT", True)),
+                priority=0)
             self._apply_schema_defaults(ec)
-            engines.append(ec)
+            entries.append((int(getattr(cls, "DEFAULT_ORDER", 100)), ec))
 
-        engines.extend(self._preset_configs())
+        for preset in PRESETS:
+            ec = EngineConfig(
+                name=preset.name, enabled=preset.enabled, priority=0,
+                module_path=preset.module_path, class_name=preset.class_name)
+            self._apply_schema_defaults(ec)
+            ec.settings.update(preset.settings)
+            entries.append((preset.order, ec))
+
+        entries.sort(key=lambda pair: pair[0])
+        engines: List[EngineConfig] = []
+        for index, (_order, ec) in enumerate(entries):
+            ec.priority = index + 1
+            engines.append(ec)
         return engines
 
     def _preset_configs(self) -> List[EngineConfig]:

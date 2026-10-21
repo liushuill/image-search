@@ -26,8 +26,23 @@ class TestBuiltinDiscovery:
     def test_builtins_are_registered(self):
         ensure_builtins_loaded()
         names = registered_names()
-        for expected in ("sauceNAO", "ascii2d", "danbooru", "iqdb", "traceMoe"):
+        # danbooru 已改由配置预设提供（见 adapters/presets.py），
+        # 不再是注册表里的类 —— 其余四个仍是
+        for expected in ("sauceNAO", "ascii2d", "iqdb", "traceMoe"):
             assert expected in names, expected
+        assert "danbooru" not in names, "danbooru 现在是配置预设，不该再注册成类"
+
+    def test_danbooru_is_provided_by_preset(self):
+        """配置预设接管后，它依然是一个可用的引擎（只是由适配器承载）"""
+        from imgsearch.engines.adapters.presets import by_name
+        from imgsearch.engines.store import EngineStore
+
+        preset = by_name("danbooru")
+        assert preset is not None
+        assert preset.class_name == "GenericJson"
+        ec = EngineStore().get("danbooru")
+        assert ec is not None
+        assert ec.class_name == "GenericJson"
 
     def test_ordered_names_follow_declared_order(self):
         """默认顺序取自各引擎的 DEFAULT_ORDER，而不是模块字母序"""
@@ -35,7 +50,8 @@ class TestBuiltinDiscovery:
         assert order.index("sauceNAO") < order.index("iqdb")
         assert order.index("iqdb") < order.index("ascii2d")
         assert order.index("ascii2d") < order.index("traceMoe")
-        assert order.index("traceMoe") < order.index("danbooru")
+        # 适配器排在最后
+        assert order.index("traceMoe") < order.index("genericJson")
 
 
 class TestNameNormalization:
@@ -48,9 +64,9 @@ class TestNameNormalization:
         assert find_builtin(name).NAME == "sauceNAO"
 
     def test_canonical_name_normalizes_builtin(self):
-        """配置里写 "Danbooru" 应归一为注册名 "danbooru" """
-        assert canonical_name("Danbooru") == "danbooru"
-        assert canonical_name("DANBOORU") == "danbooru"
+        """配置里写 "SauceNAO" 应归一为注册名 "sauceNAO" """
+        assert canonical_name("SauceNAO") == "sauceNAO"
+        assert canonical_name("SAUCENAO") == "sauceNAO"
 
     def test_canonical_name_leaves_custom_alone(self):
         assert canonical_name("MyOwnEngine") == "MyOwnEngine"
@@ -66,8 +82,15 @@ class TestResolve:
         assert resolve_engine_class(ec).NAME == "sauceNAO"
 
     def test_resolve_builtin_case_insensitive(self):
-        ec = EngineConfig(name="Danbooru")
-        assert resolve_engine_class(ec).NAME == "danbooru"
+        ec = EngineConfig(name="SauceNAO")
+        assert resolve_engine_class(ec).NAME == "sauceNAO"
+
+    def test_resolve_preset_engine(self):
+        """配置预设靠 module_path/class_name 解析，与名称无关"""
+        ec = EngineConfig(name="whatever",
+                          module_path="imgsearch.engines.adapters.generic_json",
+                          class_name="GenericJson")
+        assert resolve_engine_class(ec).NAME == "genericJson"
 
     def test_resolve_unknown_returns_none(self):
         assert resolve_engine_class(EngineConfig(name="nope")) is None
@@ -155,6 +178,10 @@ class TestSchemaLookup:
         """schema 驱动：引擎不该带上自己用不到的字段"""
         assert "long_limit" not in schema_for_class(find_builtin("ascii2d"))
         assert "bypass_cfw" in schema_for_class(find_builtin("ascii2d"))
-        assert "login" in schema_for_class(find_builtin("danbooru"))
+        # danbooru 现在是适配器配置：它的 schema 来自配置而不是类
+        from imgsearch.engines.store import EngineStore
+        danbooru_schema = EngineStore().get("danbooru").schema()
+        assert "login" in {f.key for f in danbooru_schema}
+        assert "tag_string" not in {f.key for f in danbooru_schema}
         assert "services" in schema_for_class(find_builtin("iqdb"))
         assert "cut_borders" in schema_for_class(find_builtin("traceMoe"))

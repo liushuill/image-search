@@ -266,6 +266,21 @@ class SearchEngine:
         merged.update(payload)
         return merged
 
+    @classmethod
+    def auth_mode_for(cls, settings: dict = None) -> str:
+        """
+        凭据需求的**实际值**。
+
+        默认就是类属性 ``AUTH_MODE``；声明式适配器会覆盖它 ——
+        因为同一个适配器类挂不同实例时，凭据需求由**实例配置**决定
+        （auth_mode=none 还是 query/basic），类属性说不准。
+        """
+        return cls.AUTH_MODE
+
+    def _settings_view(self) -> dict:
+        """给 auth_mode_for 用的「我这份配置」"""
+        return dict(self.options)
+
     @property
     def uses_api_key(self) -> bool:
         """
@@ -274,15 +289,16 @@ class SearchEngine:
         配置里「使用 API Key」关掉 → False（引擎应跳过凭据、按匿名处理）。
         ``AUTH_MODE == "none"`` 的引擎恒为 False —— 它本来就没有凭据可发。
         """
-        if self.AUTH_MODE == "none":
+        if self.auth_mode_for(self._settings_view()) == "none":
             return False
         return self.opt_bool("use_api_key", True)
 
     @property
     def auth_label(self) -> str:
         """给界面显示的一句话"""
+        mode = self.auth_mode_for(self._settings_view())
         return {"required": "必须凭据", "optional": "可选凭据",
-                "none": "无需凭据"}.get(self.AUTH_MODE, self.AUTH_MODE)
+                "none": "无需凭据"}.get(mode, mode)
 
     def quota_state(self) -> List[QuotaState]:
         """

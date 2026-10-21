@@ -129,15 +129,23 @@ class TestSchema:
         凭据「搬过去了却读不到」，表现为「配了 key 却仍说未配置」。
         """
         from imgsearch.engines.registry import find_builtin, schema_for_class
+        from imgsearch.engines.store import EngineStore
+        from imgsearch.service import _env_name_for
 
         assert "api_key" not in COMMON_SCHEMA
 
-        # 需要凭据的引擎：必须声明 api_key，且 env_var 与引擎代码读的一致
-        for name, expected_env in (("sauceNAO", "SAUCENAO_KEY"),
-                                   ("danbooru", "DANBOORU_API_KEY")):
-            f = schema_for_class(find_builtin(name)).get("api_key")
-            assert f is not None and f.is_secret, name
-            assert f.env_var == expected_env, f"{name} 的 env_var 不对"
+        # 需要凭据的**内置类**：必须声明 api_key，且 env_var 与引擎代码读的一致
+        f = schema_for_class(find_builtin("sauceNAO")).get("api_key")
+        assert f is not None and f.is_secret
+        assert f.env_var == "SAUCENAO_KEY"
+
+        # 需要凭据的**配置预设**（danbooru）：字段来自适配器 schema，
+        # 变量名由预设指定，最终必须落到 DANBOORU_API_KEY
+        store = EngineStore()
+        ec = store.get("danbooru")
+        f = ec.schema().get("api_key")
+        assert f is not None and f.is_secret
+        assert _env_name_for(ec, f) == "DANBOORU_API_KEY"
 
         # 不需要凭据的引擎：不该挂着无用的 api_key 字段
         for name in ("iqdb", "traceMoe", "ascii2d"):

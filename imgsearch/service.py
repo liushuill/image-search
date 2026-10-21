@@ -52,6 +52,23 @@ class CredentialSpec:
     group: str = ""
 
 
+from imgsearch.engines.schema import env_var_for  # noqa: E402
+
+
+def _env_name_for(ec, f) -> str:
+    """一个 secret 字段实际落在哪个环境变量上（三处调用必须一致）"""
+    if f.env_var:
+        return f.env_var
+    try:
+        from imgsearch.engines.adapters.presets import by_name
+        preset = by_name(ec.name)
+        if preset is not None and preset.env.get(f.key):
+            return preset.env[f.key]
+    except Exception:                                     # noqa: BLE001
+        pass
+    return env_var_for(ec.name, f)
+
+
 def declared_secrets() -> List[CredentialSpec]:
     """
     所有需要填写的凭据。
@@ -79,8 +96,7 @@ def declared_secrets() -> List[CredentialSpec]:
         store = None
 
     if store is not None:
-        from imgsearch.engines.schema import env_var_for
-
+    
         for ec in store.list_all():
             try:
                 schema = ec.schema()
@@ -95,18 +111,33 @@ def declared_secrets() -> List[CredentialSpec]:
             # ⚠️ 必须「先删掉兜底条目」而不是简单 continue：
             # KNOWN_SECRETS 那一步已经把它们加进去了，只跳过引擎的话
             # 条目会残留（就是漏了这一步才出的 bug）。
-            if not ec.get("use_api_key", True):
+            # 适配器的凭据需求看实例配置（auth_mode）：
+            # none → 不显示；query/basic → 显示且标为必填
+            cls = None
+            try:
+                from imgsearch.engines.registry import resolve_engine_class
+                cls = resolve_engine_class(ec)
+            except Exception:                             # noqa: BLE001
+                cls = None
+            mode = (cls.auth_mode_for(ec.settings)
+                    if cls is not None and hasattr(cls, "auth_mode_for")
+                    else getattr(cls, "AUTH_MODE", "required") if cls else "required")
+
+            if (not ec.get("use_api_key", True)) or mode == "none":
+                # ⚠️ 必须用与「添加」时**完全相同**的变量名解析，
+                # 否则 pop 的是派生名、留下的是实际名，凭据会残留
                 for f in secrets_of_engine:
-                    declared.pop(env_var_for(ec.name, f), None)
+                    declared.pop(_env_name_for(ec, f), None)
                 continue
 
             for f in secrets_of_engine:
-                env_name = env_var_for(ec.name, f)
+                env_name = _env_name_for(ec, f)
                 declared[env_name] = CredentialSpec(
                     env_name=env_name,
                     title=f.label,
                     description=f.help or f"由引擎「{ec.display_name}」使用",
-                    required=bool(getattr(f, "required", False)),
+                    # 适配器：能走到这里说明 auth_mode != none，两项都必需
+                    required=bool(getattr(f, "required", False)) or mode == "required",
                     mask=bool(getattr(f, "mask", True)),
                     group=ec.display_name,
                 )

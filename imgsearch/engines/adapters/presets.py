@@ -28,6 +28,11 @@ class Preset:
     order: int
     settings: Dict[str, Any] = field(default_factory=dict)
     enabled: bool = False
+    # 字段 → 环境变量名。留空则按实例名派生（多实例各用各的）；
+    # 这里显式指定是为了**沿用已有的变量名**，用户不必把 Key 再填一遍。
+    env: Dict[str, str] = field(default_factory=dict)
+    # 启用前的注意事项（显示在引擎页；等价于 Python 引擎的 USAGE_NOTE）
+    usage_note: str = ""
 
     @property
     def module_path(self) -> str:
@@ -72,6 +77,13 @@ DANBOORU = Preset(
         "min_similarity": 60,
         "request_delay": 8.0,
     },
+    env={"api_key": "DANBOORU_API_KEY", "login": "DANBOORU_LOGIN"},
+    usage_note=(
+        "需要未受限的 API Key：Danbooru 会校验 Key 的 IP 允许列表与端点权限列表"
+        "（默认都为空=不限制），任一被填过就必须匹配，否则所有端点都 403。"
+        "走代理时出口 IP 随节点变化，填死 IP 很容易失效。"
+        "不想折腾账号就用 IQDB 引擎 —— 它同样会搜 Danbooru 的帖子。"
+    ),
 )
 
 
