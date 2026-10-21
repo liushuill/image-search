@@ -112,6 +112,8 @@ def declared_secrets() -> List[CredentialSpec]:
                     if cls is not None and hasattr(cls, "auth_mode_for")
                     else getattr(cls, "AUTH_MODE", "required") if cls else "required")
 
+            auth_mode = str(ec.get("auth_mode", "") or "").strip().lower()
+
             if (not ec.get("use_api_key", True)) or mode == "none":
                 # ⚠️ 必须用与「添加」时**完全相同**的变量名解析，
                 # 否则 pop 的是派生名、留下的是实际名，凭据会残留
@@ -120,6 +122,11 @@ def declared_secrets() -> List[CredentialSpec]:
                 continue
 
             for f in secrets_of_engine:
+                # 适配器的 login 只有 basic 鉴权才用得上。query 鉴权下
+                # 它与当前配置无关，显示出来还会被误标成「必填」。
+                if f.key == "login" and auth_mode and auth_mode != "basic":
+                    declared.pop(_env_name_for(ec, f), None)
+                    continue
                 env_name = _env_name_for(ec, f)
                 declared[env_name] = CredentialSpec(
                     env_name=env_name,
@@ -131,7 +138,17 @@ def declared_secrets() -> List[CredentialSpec]:
                     group=ec.display_name,
                 )
 
-    return list(declared.values())
+    # 按「引擎分组」排序：同一引擎的凭据必须连续，否则界面上
+    # 会出现两个同名标题（例如 SauceNAO 的 API Key 和用户名被拆到两处）。
+    # 组内保持字段声明顺序（相同组内用出现次序作次键）。
+    order = {name: index for index, name in enumerate(
+        [ec.display_name for ec in (store.list_all() if store is not None else [])])}
+
+    def sort_key(item):
+        index, (env_name, spec) = item
+        return (order.get(spec.group, len(order)), index)
+
+    return [spec for _, (_, spec) in sorted(enumerate(declared.items()), key=sort_key)]
 
 
 def open_library(enabled: Optional[bool] = None):
