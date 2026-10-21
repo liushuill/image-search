@@ -79,15 +79,20 @@ class TestSchemaForm:
             # 它在 COMMON_SCHEMA 里是为了「所有引擎同一套模板」，
             # 但对 IQDB 这类没有凭据的引擎，显示一个永远用不上的开关是噪声。
             has_secrets = any(f.is_secret for f in ec.schema())
+            # auth_mode=none 的适配器（iqdb）连凭据字段都不显示
+            auth_none = str(ec.get("auth_mode", "") or "").strip().lower() == "none"
             expected = {f.key for f in ec.schema()
                         if f.key not in ("enabled", "priority")
                         and not f.is_secret
-                        and not (f.key == "use_api_key" and not has_secrets)}
+                        and not (f.key == "use_api_key"
+                                 and (not has_secrets or auth_none))}
             assert set(values) == expected, f"{ec.name} 表单字段缺失"
 
     def test_use_api_key_hidden_for_engines_without_credentials(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
         # traceMoe 已改成配置预设，这里只看仍是 Python 类的无凭据引擎
+        # iqdb 已是配置预设（auth_mode=none），ascii2d 仍是 Python 类。
+        # 两者都不该显示凭据开关 —— 一个靠配置判断，一个靠没有 secret 字段。
         for name in ("iqdb", "ascii2d"):
             ec = store.get(name)
             form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
@@ -120,10 +125,14 @@ class TestSchemaForm:
 
     def test_bool_and_kv_types(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
-        ec = store.get("iqdb")
+        ec = store.get("sauceNAO")
         form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
-        # services 是字符串字段，round-trip 应保持
-        assert form.values()["services"] == ec.get("services")
+        values = form.values()
+        # bool 直接 round-trip
+        assert values["use_api_key"] == ec.get("use_api_key")
+        # kv 字段在表单里是文本（逐行 key=value），保存时按 schema 转成字典
+        store.update("sauceNAO", headers="X-Test=1")
+        assert store.get("sauceNAO").get("headers") == {"X-Test": "1"}
 
     def test_error_banner_and_highlight(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm

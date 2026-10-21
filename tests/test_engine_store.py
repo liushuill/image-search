@@ -22,6 +22,7 @@ class TestDefaults:
 
     def test_default_order_matches_declared_order(self, store):
         # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
+        # 顺序按 DEFAULT_ORDER / preset.order 混排
         assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
                                  "danbooru", "genericJson", "genericHtml"]
 
@@ -217,6 +218,7 @@ class TestCrud:
         store.remove("mine")
         store.reset()
         # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
+        # 顺序按 DEFAULT_ORDER / preset.order 混排
         assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
                                  "danbooru", "genericJson", "genericHtml"]
 

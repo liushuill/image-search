@@ -118,7 +118,11 @@ def render_template(template: str, lookup) -> str:
 
         def replace(match, _missing=missing):
             expr = match.group(1)
-            name, _, fmt = expr.partition(":")
+            # ⚠️ 从右边切，且只有 **:time** 才当格式说明 ——
+            # 否则 CSS 选择器里的冒号（`td:has(img)`）会被误拆
+            name, _, fmt = expr.rpartition(":")
+            if fmt.strip().lower() != "time":
+                name, fmt = expr, ""
             value = lookup(name.strip())
             if fmt.strip().lower() == "time":
                 value = format_clock(value)
@@ -155,11 +159,18 @@ def _as_int(raw: str, default: int = 0) -> int:
         return default
 
 
-def _absolute_url(url: str) -> str:
-    """把协议相对地址补全"""
+def _absolute_url(url: str, base: str = "") -> str:
+    """
+    补全相对地址。
+
+    - ``//host/x``  → ``https://host/x``（协议相对，很多图库这么写）
+    - ``/x``        → ``<base>/x``（站内路径，IQDB 的缩略图就是这样）
+    """
     text = (url or "").strip()
     if text.startswith("//"):
         return "https:" + text
+    if text.startswith("/") and base:
+        return base.rstrip("/") + text
     return text
 
 
@@ -496,7 +507,8 @@ class DeclarativeEngine(SearchEngine):
 
         # 协议相对地址（``//konachan.com/x``）补成 https —— 很多图库这么写，
         # 不补的话在结果表里点不开
-        links = [_absolute_url(u) for u in get_links(
+        base = (self.api_url or self.DEFAULT_API_URL or "").strip()
+        links = [_absolute_url(u, base) for u in get_links(
             split_transform(str(self.opt("field_urls", "") or ""))[0]) if u]
         pixiv_id = self._field_text(get_text, "field_pixiv_id")
         # 有些站点只给 URL，不给 pixiv_id —— 交给 SearchResult 的归一化去补
@@ -509,9 +521,9 @@ class DeclarativeEngine(SearchEngine):
             material=self._field_text(get_text, "field_material") or None,
             ext_urls=links,
             highres_url=_absolute_url(
-                self._field_text(get_text, "field_highres")) or None,
+                self._field_text(get_text, "field_highres"), base) or None,
             thumbnail=_absolute_url(
-                self._field_text(get_text, "field_thumbnail")) or None,
+                self._field_text(get_text, "field_thumbnail"), base) or None,
             detail=self._field_text(get_text, "field_detail") or None,
             danbooru_id=self._field_text(get_text, "field_danbooru_id") or None,
             gelbooru_id=self._field_text(get_text, "field_gelbooru_id") or None,

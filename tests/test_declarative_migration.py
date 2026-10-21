@@ -386,3 +386,96 @@ class TestSauceNAOMigration:
         """
         new = self._new()[0]
         assert new.highres_url == "https://www.pixiv.net/artworks/111"
+
+
+# ──────────────────────────────────────────────
+#  IQDB：HTML + 整行取相似度 + 单元格取图库名
+# ──────────────────────────────────────────────
+
+IQDB_SAMPLE = """<html><body><div id="pages">
+  <table>
+    <tr><th>Your image</th></tr>
+    <tr><td class="image"><img src="/thu/thu_abc.jpg"></td>
+        <td>1914×1276</td></tr>
+  </table>
+  <table>
+    <tr><th>Possible match</th></tr>
+    <tr><td class="image">
+      <a href="//konachan.com/post/show/194032">
+        <img src="/konachan/c/6/a/c6a75391.jpg"></a></td>
+        <td><img class="service-icon" src="/favicon.png"> Konachan</td>
+        <td>1200×850 [Safe]</td><td>41% similarity</td></tr>
+  </table>
+  <table>
+    <tr><th>Possible match</th></tr>
+    <tr><td class="image">
+      <a href="https://danbooru.donmai.us/posts/555">
+        <img src="/danbooru/aa/bb.jpg"></a></td>
+        <td><img class="service-icon" src="/favicon.png"> Danbooru</td>
+        <td>800×600 [Safe]</td><td>88% similarity</td></tr>
+  </table>
+</div></body></html>"""
+
+IQDB_SETTINGS = dict(
+    api_url="https://iqdb.org", endpoint="/", method="POST",
+    image_field="file", url_field="url", url_in="data", auth_mode="none",
+    container_selector="#pages", row_selector="table",
+    row_must_contain="similarity", similarity_scale="percent-text",
+    field_similarity=":self",
+    field_urls="td.image a@href", field_thumbnail="td.image img@src",
+    field_highres="td.image a@href|td.image img@src",
+    field_detail="td:has(img.service-icon)",
+    field_danbooru_id=(r"td.image a@href~regex:danbooru[^/]*/"
+                       r"(?:posts|post/show)/(\d+)"),
+    field_gelbooru_id=(r"td.image a@href~regex:gelbooru[^/]*/"
+                       r".*[?&]id=(\d+)"),
+    min_similarity=0,
+)
+
+
+class TestIQDBMigration:
+    def _old(self):
+        from imgsearch.engines.iqdb import Iqdb
+        return Iqdb()._parse_results(IQDB_SAMPLE)
+
+    def _new(self):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+        engine = _adapter(GenericHtml, IQDB_SETTINGS, IQDB_SAMPLE)
+        return engine.search("/tmp/x.jpg")
+
+    def test_same_count(self):
+        """「Your image」那一块不该算结果 —— 靠 row_must_contain 过滤掉"""
+        assert len(self._old()) == len(self._new()) == 2
+
+    @pytest.mark.parametrize("field", ["similarity", "ext_urls", "thumbnail"])
+    def test_field_matches(self, field):
+        for a, b in zip(self._old(), self._new()):
+            assert getattr(a, field) == getattr(b, field), field
+
+    def test_service_name_from_cell_text(self):
+        """图库名就在单元格文本里，不需要按主机名查映射表"""
+        assert [r.detail for r in self._new()] == ["Danbooru", "Konachan"]
+
+    def test_ids_extracted_by_regex(self):
+        new = {r.detail: r for r in self._new()}
+        assert new["Danbooru"].danbooru_id == "555"
+        assert new["Konachan"].danbooru_id is None
+
+    def test_relative_thumbnail_is_absolutized(self):
+        """IQDB 的缩略图是站内路径 /konachan/...，必须补成绝对地址"""
+        for r in self._new():
+            assert r.thumbnail.startswith("https://iqdb.org/")
+
+    def test_known_gap_dimensions_are_dropped(self):
+        """
+        手写版的 detail 是「图库名 | 尺寸」，配置版只剩图库名。
+        原因：把两个单元格拼一句需要模板，而模板里的 {选择器} 与
+        CSS 的冒号语法互相干扰；尺寸又只在相邻单元格里，
+        现有选择器语法取不到（soupsieve 的 nth-child/兄弟选择器
+        在这个结构上不生效）。这是**已记录的损失**。
+        """
+        # 两条都按相似度降序，第一条是 Danbooru（88%）
+        old = self._old()[0].detail
+        new = self._new()[0].detail
+        assert "800x600" in old           # 手写版：图库名 | 尺寸
+        assert "800x600" not in new       # 配置版：只有图库名

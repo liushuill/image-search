@@ -174,8 +174,50 @@ TRACEMOE = Preset(
 )
 
 
+# ──────────────────────────────────────────────
+#  IQDB：原本 imgsearch/engines/iqdb.py（290 行）
+# ──────────────────────────────────────────────
+IQDB = Preset(
+    name="iqdb",
+    display="IQDB（多图库聚合）",
+    adapter=HTML_ADAPTER,
+    order=20,
+    enabled=True,
+    settings={
+        "api_url": "https://iqdb.org",
+        "endpoint": "/",
+        "method": "POST",
+        "image_field": "file",
+        "url_field": "url",
+        "url_in": "data",
+        "auth_mode": "none",
+        "container_selector": "#pages",
+        "row_selector": "table",
+        # 「Your image」「No relevant matches」也是 table，过滤掉
+        "row_must_contain": "similarity",
+        # 相似度写在整行文本里（"42% similarity"）
+        "similarity_scale": "percent-text",
+        "field_similarity": ":self",
+        "field_urls": "td.image a@href",
+        "field_thumbnail": "td.image img@src",
+        "field_highres": "td.image a@href|td.image img@src",
+        # 图库名就在单元格文本里，不用按主机名映射
+        "field_detail": "td:has(img.service-icon)",
+        # 抠帖子 ID：按主机名限定，避免把别人的数字当成 danbooru_id
+        "field_danbooru_id": ("td.image a@href~"
+                              r"regex:danbooru[^/]*/(?:posts|post/show)/(\d+)"),
+        "field_gelbooru_id": ("td.image a@href~"
+                              r"regex:gelbooru[^/]*/.*[?&]id=(\d+)"),
+        "min_similarity": 65,
+        "request_delay": 8.0,
+    },
+    usage_note="不需要账号，用来补 Danbooru 系图库的覆盖。",
+)
+
+
 PRESETS = (
     SAUCENAO,
+    IQDB,
     DANBOORU,
     TRACEMOE,
 )

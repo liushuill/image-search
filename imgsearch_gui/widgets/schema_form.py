@@ -81,8 +81,24 @@ class SchemaForm(QtWidgets.QWidget):
         # 放在 COMMON_SCHEMA 里是为了所有引擎同一套模板；
         # 这里按引擎实际需要把它藏掉，避免 IQDB 这类显示一个永远用不上的开关。
         has_secrets = any(getattr(f, "is_secret", False) for f in schema)
+
+        # 适配器声明了 api_key/login，但 auth_mode=none 时它们完全用不上 ——
+        # 显示出来只会让用户以为「这里要填点什么」。
+        auth_none = False
+        if self.engine_name:
+            try:
+                from imgsearch.engines.store import get_store
+                _ec = get_store().get(self.engine_name)
+                if _ec is not None:
+                    auth_none = (str(_ec.get("auth_mode", "") or "")
+                                 .strip().lower() == "none")
+            except Exception:                             # noqa: BLE001
+                auth_none = False
+
         for f in schema:
-            if f.key == "use_api_key" and not has_secrets:
+            if f.key == "use_api_key" and (not has_secrets or auth_none):
+                continue
+            if getattr(f, "is_secret", False) and auth_none:
                 continue
             if f.key in ("enabled", "priority"):
                 continue

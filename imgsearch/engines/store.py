@@ -630,6 +630,8 @@ class EngineStore:
         已有条目的顺序与配置一律保留，新引擎追加在末尾。
         """
         registry.ensure_builtins_loaded()
+        from imgsearch.engines.adapters.presets import PRESETS
+
         existing = {e.name.strip().lower() for e in engines}
         for name in registry.ordered_builtin_names():
             if name.strip().lower() in existing:
@@ -642,6 +644,20 @@ class EngineStore:
             )
             self._apply_schema_defaults(ec)
             engines.append(ec)
+            existing.add(name.strip().lower())
+
+        # 配置预设也要补：它们不再是注册类，否则升级后不会出现
+        for preset in PRESETS:
+            if preset.name.strip().lower() in existing:
+                continue
+            ec = EngineConfig(name=preset.name, enabled=preset.enabled,
+                              priority=len(engines) + 1,
+                              module_path=preset.module_path,
+                              class_name=preset.class_name)
+            self._apply_schema_defaults(ec)
+            ec.settings.update(preset.settings)
+            engines.append(ec)
+            existing.add(preset.name.strip().lower())
         return engines
 
     def save(self) -> None:

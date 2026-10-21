@@ -315,10 +315,10 @@ class TestGuiUsageNote:
         assert "API Key" in page.usage_label.text()
         assert page.usage_label.isHidden() is False
 
-    def test_label_hidden_for_iqdb(self, qapp):
+    def test_label_hidden_for_engine_without_note(self, qapp):
         from imgsearch_gui.pages.engines_page import EnginesPage
         page = EnginesPage()
-        self._select(page, "iqdb")
+        self._select(page, "ascii2d")
         assert page.usage_label.text() == ""
         assert page.usage_label.isHidden() is True
 

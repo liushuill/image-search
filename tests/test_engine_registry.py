@@ -28,8 +28,8 @@ class TestBuiltinDiscovery:
         names = registered_names()
         # danbooru 已改由配置预设提供（见 adapters/presets.py），
         # 不再是注册表里的类 —— 其余四个仍是
-        # sauceNAO / danbooru / traceMoe 已改成配置预设，不再是注册类
-        for expected in ("ascii2d", "iqdb", "genericJson"):
+        # sauceNAO / iqdb / danbooru / traceMoe 已改成配置预设，不再是注册类
+        for expected in ("ascii2d", "genericJson", "genericHtml"):
             assert expected in names, expected
         # danbooru / traceMoe 已由配置预设提供，不再是注册表里的类
         for moved in ("danbooru", "traceMoe"):
@@ -50,26 +50,25 @@ class TestBuiltinDiscovery:
     def test_ordered_names_follow_declared_order(self):
         """默认顺序取自各引擎的 DEFAULT_ORDER，而不是模块字母序"""
         order = ordered_builtin_names()
-        assert order.index("iqdb") < order.index("ascii2d")
-        assert order.index("iqdb") < order.index("ascii2d")
+        assert order.index("ascii2d") < order.index("genericJson")
         assert order.index("ascii2d") < order.index("genericJson")
         # 适配器排在最后
         assert order.index("ascii2d") < order.index("genericHtml")
 
 
 class TestNameNormalization:
-    @pytest.mark.parametrize("name", ["iqdb", "IQDB", "Iqdb", "iqdb"])
+    @pytest.mark.parametrize("name", ["ascii2d", "Ascii2D", "ASCII2D", "ascii2d"])
     def test_is_builtin_is_case_insensitive(self, name):
         assert is_builtin(name) is True
 
-    @pytest.mark.parametrize("name", ["iqdb", "IQDB", "Iqdb"])
+    @pytest.mark.parametrize("name", ["ascii2d", "Ascii2D", "ASCII2D"])
     def test_find_builtin_is_case_insensitive(self, name):
-        assert find_builtin(name).NAME == "iqdb"
+        assert find_builtin(name).NAME == "ascii2d"
 
     def test_canonical_name_normalizes_builtin(self):
-        """配置里写 "IQDB" 应归一为注册名 "iqdb" """
-        assert canonical_name("IQDB") == "iqdb"
-        assert canonical_name("Iqdb") == "iqdb"
+        """配置里写 "Ascii2D" 应归一为注册名 "ascii2d" """
+        assert canonical_name("Ascii2D") == "ascii2d"
+        assert canonical_name("ASCII2D") == "ascii2d"
 
     def test_canonical_name_normalizes_preset(self):
         """配置预设也参与归一化：老配置里写 "SauceNAO" 仍应认得出"""
@@ -86,12 +85,12 @@ class TestNameNormalization:
 
 class TestResolve:
     def test_resolve_builtin(self):
-        ec = EngineConfig(name="IQDB")
-        assert resolve_engine_class(ec).NAME == "iqdb"
+        ec = EngineConfig(name="ASCII2D")
+        assert resolve_engine_class(ec).NAME == "ascii2d"
 
     def test_resolve_builtin_case_insensitive(self):
-        ec = EngineConfig(name="IQDB")
-        assert resolve_engine_class(ec).NAME == "iqdb"
+        ec = EngineConfig(name="ASCII2D")
+        assert resolve_engine_class(ec).NAME == "ascii2d"
 
     def test_resolve_preset_engine(self):
         """配置预设靠 module_path/class_name 解析，与名称无关"""
@@ -173,10 +172,10 @@ class TestDynamicCacheKeying:
 
 class TestSchemaLookup:
     def test_schema_for_class(self):
-        cls = find_builtin("traceMoe") or find_builtin("iqdb")
+        cls = find_builtin("ascii2d")
         schema = schema_for_class(cls)
         assert "long_limit" not in schema       # 通用 schema 不含限流
-        assert "services" in schema             # iqdb 自己的字段
+        assert "bypass_cfw" in schema           # ascii2d 自己的字段
 
     def test_schema_for_class_none_falls_back_to_common(self):
         from imgsearch.engines.schema import COMMON_SCHEMA
@@ -191,7 +190,7 @@ class TestSchemaLookup:
         danbooru_schema = EngineStore().get("danbooru").schema()
         assert "login" in {f.key for f in danbooru_schema}
         assert "tag_string" not in {f.key for f in danbooru_schema}
-        assert "services" in schema_for_class(find_builtin("iqdb"))
+        assert "bypass_cfw" in schema_for_class(find_builtin("ascii2d"))
         # traceMoe 现在是适配器配置，它的 schema 来自配置
         from imgsearch.engines.store import EngineStore
         assert "cut_borders" not in {f.key for f in EngineStore().get("traceMoe").schema()}

@@ -39,6 +39,7 @@ _SKIP_MODULES = {
     "danbooru",
     "tracemoe",
     "saucenao",
+    "iqdb",
 }
 
 _builtins_loaded = False
