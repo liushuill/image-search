@@ -28,9 +28,11 @@ class TestBuiltinDiscovery:
         names = registered_names()
         # danbooru 已改由配置预设提供（见 adapters/presets.py），
         # 不再是注册表里的类 —— 其余四个仍是
-        for expected in ("sauceNAO", "ascii2d", "iqdb", "traceMoe"):
+        for expected in ("sauceNAO", "ascii2d", "iqdb"):
             assert expected in names, expected
-        assert "danbooru" not in names, "danbooru 现在是配置预设，不该再注册成类"
+        # danbooru / traceMoe 已由配置预设提供，不再是注册表里的类
+        for moved in ("danbooru", "traceMoe"):
+            assert moved not in names, f"{moved} 现在是配置预设，不该再注册成类"
 
     def test_danbooru_is_provided_by_preset(self):
         """配置预设接管后，它依然是一个可用的引擎（只是由适配器承载）"""
@@ -49,9 +51,9 @@ class TestBuiltinDiscovery:
         order = ordered_builtin_names()
         assert order.index("sauceNAO") < order.index("iqdb")
         assert order.index("iqdb") < order.index("ascii2d")
-        assert order.index("ascii2d") < order.index("traceMoe")
+        assert order.index("ascii2d") < order.index("genericJson")
         # 适配器排在最后
-        assert order.index("traceMoe") < order.index("genericJson")
+        assert order.index("sauceNAO") < order.index("genericHtml")
 
 
 class TestNameNormalization:
@@ -184,4 +186,6 @@ class TestSchemaLookup:
         assert "login" in {f.key for f in danbooru_schema}
         assert "tag_string" not in {f.key for f in danbooru_schema}
         assert "services" in schema_for_class(find_builtin("iqdb"))
-        assert "cut_borders" in schema_for_class(find_builtin("traceMoe"))
+        # traceMoe 现在是适配器配置，它的 schema 来自配置
+        from imgsearch.engines.store import EngineStore
+        assert "cut_borders" not in {f.key for f in EngineStore().get("traceMoe").schema()}

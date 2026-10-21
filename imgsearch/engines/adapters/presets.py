@@ -87,8 +87,51 @@ DANBOORU = Preset(
 )
 
 
+# ──────────────────────────────────────────────
+#  TraceMoe：原本 imgsearch/engines/tracemoe.py（221 行）
+# ──────────────────────────────────────────────
+TRACEMOE = Preset(
+    name="traceMoe",
+    display="TraceMoe（动画截图）",
+    adapter=JSON_ADAPTER,
+    order=40,
+    enabled=False,
+    settings={
+        "api_url": "https://api.trace.moe/search",
+        "endpoint": "",
+        "method": "POST",
+        "image_field": "image",
+        "url_field": "url",
+        "url_in": "params",
+        "auth_mode": "none",
+        "results_path": "result",
+        # 它给的 similarity 是 0–1 的小数
+        "similarity_scale": "0-1",
+        "field_similarity": "similarity",
+        # 手写版拼的是「第 5 集 @ 15:48」
+        "field_title": "template:第 {episode} 集 @ {from:time}",
+        "field_material": ("anilist.title.chinese|anilist.title.native|"
+                           "anilist.title.romaji|anilist.title.english"),
+        # 主制作公司 = studios 里 isMain 为真的那个
+        "field_artist": "anilist.studios.edges[?isMain=true].node.name",
+        "field_urls": "anilist.siteUrl|video",
+        "field_highres": "image",
+        "field_thumbnail": "image",
+        "field_detail": "filename",
+        # 手写版也传这两个查询参数，否则结果集不同
+        "params": {"anilistInfo": "", "cutBorders": ""},
+        "long_limit": 100,
+        "long_window": 60,
+        "min_similarity": 85,
+        "request_delay": 8.0,
+    },
+    usage_note="动画截图专用：能定位到「第几集、第几分几秒」，但只对动画有效。",
+)
+
+
 PRESETS = (
     DANBOORU,
+    TRACEMOE,
 )
 
 

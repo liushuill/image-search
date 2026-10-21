@@ -35,7 +35,7 @@ from imgsearch.engines.schema import (
 _CONFIG_KEY = "search_engines"
 # 引擎配置的结构版本，用于「字段默认值变更后需要重刷」这类迁移
 _VERSION_KEY = "search_engines_version"
-_SCHEMA_VERSION = 5
+_SCHEMA_VERSION = 6
 
 # 结构性字段：不进 settings
 _STRUCTURAL_KEYS = ("name", "enabled", "priority", "module_path", "class_name", "settings")
@@ -201,6 +201,20 @@ class EngineConfig:
 # ──────────────────────────────────────────────
 
 
+def _is_unset(value) -> bool:
+    """
+    判断一个配置值是否「没设过」，用于预设补全。
+
+    ⚠️ 只把 None / 空串 / 空容器当作未设置 —— ``0`` 与 ``False`` 是
+    **有意义的取值**（0 = 不限制、False = 关闭），绝不能被预设顶掉。
+    """
+    if value is None or value == "":
+        return True
+    if isinstance(value, (dict, list, tuple)) and not value:
+        return True
+    return False
+
+
 class EngineStore:
     """引擎配置的读写与增删改查"""
 
@@ -307,7 +321,29 @@ class EngineStore:
         if stored_version < 5:
             self._reconcile_secret_env_names()
 
+        if stored_version < 6:
+            # v6：部分引擎从 Python 类改成了配置预设。
+            # 旧配置里存的是**旧类 schema 的默认值**（例如 traceMoe 的
+            # min_similarity 在适配器上是通用默认 60，而它校准过的值是 85），
+            # 所以这一步按预设重新播种一次。
+            # 代价：这些引擎上的个别用户自定义会在升级时被覆盖 ——
+            # 实验中可接受；正式版应改成「只刷新已知被旧默认值污染的键」。
+            self._reseed_preset_engines()
+
         return True
+
+    def _reseed_preset_engines(self) -> None:
+        """把预设引擎的配置按预设刷新一遍（v6 迁移用）"""
+        from imgsearch.engines.adapters.presets import PRESETS
+
+        for preset in PRESETS:
+            for e in self._engines:
+                if e.name.strip().lower() != preset.name.lower():
+                    continue
+                if not (e.module_path and e.class_name):
+                    e.module_path = preset.module_path
+                    e.class_name = preset.class_name
+                e.settings.update(preset.settings)
 
     def _reconcile_secret_env_names(self) -> None:
         """
@@ -539,7 +575,7 @@ class EngineStore:
                 ec.module_path = preset.module_path
                 ec.class_name = preset.class_name
             for key, value in preset.settings.items():
-                if key not in ec.settings or ec.settings[key] in ("", None):
+                if key not in ec.settings or _is_unset(ec.settings[key]):
                     ec.settings[key] = value
         return engines
 

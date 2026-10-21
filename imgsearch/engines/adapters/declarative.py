@@ -89,6 +89,49 @@ def apply_transforms(value: str, transforms: List[str]) -> str:
     return text
 
 
+def format_clock(raw: str) -> str:
+    """秒数 → mm:ss（与手写引擎一致：147.6 → 02:27）"""
+    try:
+        total = int(float(raw))
+    except (TypeError, ValueError):
+        return ""
+    return f"{total // 60:02d}:{total % 60:02d}"
+
+
+def render_template(template: str, lookup) -> str:
+    """
+    渲染 ``第 {episode} 集 @ {from:time}`` 这样的模板。
+
+    ``{路径}`` 取该路径的文本；``{路径:time}`` 把秒数格式化成 mm:ss。
+    用处：把几个字段拼成一句人读的标题（TraceMoe 的「第 5 集 @ 15:48」）。
+
+    ⚠️ 刻意只支持「取值 + 时间格式」——真正的计算逻辑请写引擎文件。
+    """
+    # 按 " @ " 分段：某一段里有占位符取不到值，就**整段丢掉** ——
+    # 否则「第 {episode} 集」会变成「第  集」。
+    # 这与手写引擎「只拼存在的部分」的行为一致。
+    parts = []
+    for segment in template.split(" @ "):
+        missing = {"hit": False}
+
+        def replace(match, _missing=missing):
+            expr = match.group(1)
+            name, _, fmt = expr.partition(":")
+            value = lookup(name.strip())
+            if fmt.strip().lower() == "time":
+                value = format_clock(value)
+            if not value:
+                _missing["hit"] = True
+                return ""
+            return value
+
+        rendered = re.sub(r"\{([^{}]+)\}", replace, segment).strip(" ·-|,，。　")
+        if missing["hit"] or not rendered:
+            continue
+        parts.append(rendered)
+    return " @ ".join(parts)
+
+
 def split_transform(spec: str):
     """``"data.x~strip_prefix:a:"`` → ("data.x", ["strip_prefix:a:"])"""
     if not spec:
@@ -411,8 +454,18 @@ class DeclarativeEngine(SearchEngine):
     # ── 结果组装 ────────────────────────────────
 
     def _field_text(self, get_text, key: str) -> str:
-        """读一个文本字段并按 `~` 应用变换"""
-        base, transforms = split_transform(str(self.opt(key, "") or ""))
+        """
+        读一个文本字段。
+
+        三种写法：
+            path                    直接取
+            path~strip_prefix:X     取值后做变换
+            template:第 {a} 集 @ {b:time}   多个字段拼一句话
+        """
+        spec = str(self.opt(key, "") or "")
+        if spec.startswith("template:"):
+            return render_template(spec[len("template:"):], get_text)
+        base, transforms = split_transform(spec)
         return apply_transforms(get_text(base), transforms)
 
     def _make_result(self, get_text, get_links, index: int = 0) -> Optional[SearchResult]:

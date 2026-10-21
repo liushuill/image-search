@@ -87,7 +87,8 @@ class TestSchemaForm:
 
     def test_use_api_key_hidden_for_engines_without_credentials(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm
-        for name in ("iqdb", "ascii2d", "traceMoe"):
+        # traceMoe 已改成配置预设，这里只看仍是 Python 类的无凭据引擎
+        for name in ("iqdb", "ascii2d"):
             ec = store.get(name)
             form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
             assert "use_api_key" not in form._widgets, f"{name} 不该显示这个开关"

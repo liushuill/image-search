@@ -7,6 +7,7 @@
     "header.similarity"    嵌套取值
     "data.ext_urls"        取出数组
     "results[0].data"      数组下标
+    "edges[?isMain=true].node.name"   取数组里第一个 isMain 为真的元素
     ""                     空串 = 对象本身
 
 严格说这不是完整 JSONPath —— 故意不支持通配、过滤、递归下降：
@@ -33,11 +34,24 @@ def dig(data: Any, path: str) -> Any:
         part = part.strip()
         if not part:
             continue
-        name, indices = _split_indices(part)
+        name, indices, selector = _split_indices(part)
         if name:
             if not isinstance(current, dict):
                 return None
             current = current.get(name, _MISSING)
+            if current is _MISSING:
+                return None
+        # [?key=value]：从数组里挑第一个满足条件的元素。
+        # 有些接口不直接给「主制作公司」，只给一个带 isMain 的列表。
+        if selector is not None:
+            if not isinstance(current, (list, tuple)):
+                return None
+            key, expected = selector
+            current = next(
+                (item for item in current
+                 if isinstance(item, dict)
+                 and _matches(item.get(key), expected)),
+                _MISSING)
             if current is _MISSING:
                 return None
         for index in indices:
@@ -125,16 +139,37 @@ def _as_text(value: Any) -> str:
     return str(value).strip()
 
 
+def _matches(actual: Any, expected: str) -> bool:
+    """把数组元素里的值与配置里写的字符串比对"""
+    if actual is None:
+        return False
+    if isinstance(actual, bool):
+        return str(actual).lower() == expected.lower()
+    return str(actual) == expected
+
+
 def _split_indices(part: str):
-    """``a[0][2]`` → ("a", [0, 2])"""
+    """
+    解析一个路径片段。
+
+    ``a[0][2]``              → ("a", [0, 2], None)
+    ``edges[?isMain=true]``  → ("edges", [], ("isMain", "true"))
+    """
     indices = []
+    selector = None
     name = part
     while "[" in name and name.endswith("]"):
         head, _, tail = name.rpartition("[")
+        inner = tail[:-1]
+        if inner.startswith("?") and "=" in inner:
+            key, _, expected = inner[1:].partition("=")
+            selector = (key.strip(), expected.strip())
+            name = head
+            break
         try:
-            index = int(tail[:-1])
+            index = int(inner)
         except ValueError:
             break
         indices.insert(0, index)
         name = head
-    return name, indices
+    return name, indices, selector

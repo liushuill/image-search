@@ -34,9 +34,10 @@ _SKIP_MODULES = {
     "base", "schema", "registry", "store", "presets",
     "config", "__init__", "__main__",
     # 实验分支 experiment/declarative-only：
-    # danbooru 已改由 adapters/presets.py 的配置预设提供，
-    # 这个模块保留仅作对照/回滚，不再自动注册成内置引擎。
+    # 下面这些已改由 adapters/presets.py 的配置预设提供，
+    # 模块保留仅作对照/回滚，不再自动注册成内置引擎。
     "danbooru",
+    "tracemoe",
 }
 
 _builtins_loaded = False

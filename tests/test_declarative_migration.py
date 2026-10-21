@@ -186,3 +186,98 @@ class TestDanbooruMigration:
             engine.search(str(image))
         assert captured["auth"] is not None
         assert captured["auth"].username == "someone"
+
+
+# ──────────────────────────────────────────────
+#  TraceMoe：JSON + 0–1 量纲 + 模板标题 + 数组筛选
+# ──────────────────────────────────────────────
+
+TRACEMOE_PAYLOAD = {
+    "result": [
+        {
+            "similarity": 0.375,
+            "episode": 5,
+            "from": 948.0,
+            "filename": "some_ep05.mkv",
+            "image": "https://api.trace.moe/video/a.jpg",
+            "video": "https://api.trace.moe/video/a",
+            "anilist": {
+                "title": {"chinese": "", "native": "日本語タイトル",
+                          "romaji": "Romaji Title", "english": "English Title"},
+                "siteUrl": "https://anilist.co/anime/21110",
+                "studios": {"edges": [
+                    {"isMain": False, "node": {"name": "副工作室"}},
+                    {"isMain": True, "node": {"name": "主工作室"}},
+                ]},
+            },
+        },
+        {
+            "similarity": 0.301,
+            "from": 23.0,
+            "filename": "another.mkv",
+            "image": "https://api.trace.moe/video/b.jpg",
+            "video": "https://api.trace.moe/video/b",
+            "anilist": {"title": {"romaji": "Second"}, "siteUrl": "",
+                        "studios": {"edges": []}},
+        },
+    ]
+}
+
+TRACEMOE_SETTINGS = dict(
+    api_url="https://api.trace.moe/search", endpoint="", method="POST",
+    image_field="image", url_field="url", url_in="params", auth_mode="none",
+    results_path="result", similarity_scale="0-1",
+    field_similarity="similarity",
+    field_title="template:第 {episode} 集 @ {from:time}",
+    field_material=("anilist.title.chinese|anilist.title.native|"
+                    "anilist.title.romaji|anilist.title.english"),
+    field_artist="anilist.studios.edges[?isMain=true].node.name",
+    field_urls="anilist.siteUrl|video",
+    field_highres="image", field_thumbnail="image", field_detail="filename",
+    params={"anilistInfo": "", "cutBorders": ""},
+    min_similarity=0,
+)
+
+
+class TestTraceMoeMigration:
+    def _old(self):
+        from imgsearch.engines.tracemoe import TraceMoe
+        return TraceMoe()._parse_results(json.loads(json.dumps(TRACEMOE_PAYLOAD)))
+
+    def _new(self):
+        from imgsearch.engines.adapters.generic_json import GenericJson
+        engine = _adapter(GenericJson, TRACEMOE_SETTINGS,
+                          json.dumps(TRACEMOE_PAYLOAD))
+        return engine.search("/tmp/x.jpg")
+
+    def test_same_count(self):
+        assert len(self._old()) == len(self._new()) == 2
+
+    @pytest.mark.parametrize("field", [
+        "similarity", "title", "material", "artist",
+        "ext_urls", "highres_url", "thumbnail",
+    ])
+    def test_field_matches(self, field):
+        old, new = self._old(), self._new()
+        for i, (a, b) in enumerate(zip(old, new)):
+            assert getattr(a, field) == getattr(b, field), (
+                f"第 {i} 条的 {field}：{getattr(a, field)!r} != {getattr(b, field)!r}")
+
+    def test_similarity_is_scaled_from_0_1(self):
+        assert [round(r.similarity, 1) for r in self._new()] == [37.5, 30.1]
+
+    def test_title_template_matches_handwritten(self):
+        """手写版拼「第 5 集 @ 15:48」，配置版用模板，结果必须一致"""
+        assert self._new()[0].title == self._old()[0].title == "第 5 集 @ 15:48"
+
+    def test_title_template_drops_missing_parts(self):
+        """第二条没有集数，只该留下时间 —— 不能出现「第  集」"""
+        assert self._new()[1].title == "00:23"
+
+    def test_main_studio_selected_by_filter(self):
+        """手写版遍历 studios 找 isMain；配置版用 [?isMain=true] 表达"""
+        assert self._new()[0].artist == self._old()[0].artist == "主工作室"
+
+    def test_multilingual_title_fallback(self):
+        """chinese 为空时回退到 native"""
+        assert self._new()[0].material == "日本語タイトル"
