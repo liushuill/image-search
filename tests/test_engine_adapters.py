@@ -333,3 +333,111 @@ class TestAdapterRegistration:
         assert resolve_engine_class(store.get("booruA")) is not None
         assert resolve_engine_class(store.get("booruB")) is not None
         assert store.get("booruA").name != store.get("booruB").name
+
+
+# ──────────────────────────────────────────────
+#  字段变换与运行时能力（把内置引擎改造成配置的前提）
+# ──────────────────────────────────────────────
+
+
+class TestFieldTransforms:
+    def test_strip_prefix(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        assert apply_transforms("artist:someone", ["strip_prefix:artist:"]) == "someone"
+
+    def test_strip_prefix_not_present_keeps_value(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        assert apply_transforms("someone", ["strip_prefix:artist:"]) == "someone"
+
+    def test_strip_suffix(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        assert apply_transforms("foo.jpg", ["strip_suffix:.jpg"]) == "foo"
+
+    def test_regex_first_group(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        url = "https://www.pixiv.net/artworks/12345"
+        assert apply_transforms(url, [r"regex:artworks/(\d+)"]) == "12345"
+
+    def test_regex_no_match_becomes_empty(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        assert apply_transforms("nope", [r"regex:artworks/(\d+)"]) == ""
+
+    def test_regex_without_group_uses_whole_match(self):
+        from imgsearch.engines.adapters.declarative import apply_transforms
+        assert apply_transforms("abc123", [r"regex:c\d+"]) == "c123"
+
+    def test_split_transform(self):
+        from imgsearch.engines.adapters.declarative import split_transform
+        assert split_transform("data.x~strip_prefix:a:") == ("data.x", ["strip_prefix:a:"])
+        assert split_transform("data.x") == ("data.x", [])
+
+    def test_transform_applied_end_to_end(self):
+        """`tag_string_artist` 里带 `artist:` 前缀 —— 配置能把它剥掉"""
+        payload = {"r": [{"tag_string_artist": "artist:someone", "id": 1}]}
+        adapter = make_json(results_path="r", field_artist="tag_string_artist~strip_prefix:artist:",
+                            field_urls="photo_url", similarity_scale="none")
+        adapter._request = lambda **k: json.dumps(payload)      # type: ignore
+        got = adapter.search("/tmp/x.jpg")
+        assert got[0].artist == "someone"
+
+
+class TestRankSimilarity:
+    """有些站点（Danbooru）不返回相似度，只能按排名估算"""
+
+    def _parse(self, n, **kw):
+        payload = {"r": [{"id": i, "u": f"u{i}"} for i in range(n)]}
+        adapter = make_json(results_path="r", similarity_scale="rank",
+                            field_urls="u", **kw)
+        adapter._request = lambda **k: json.dumps(payload)      # type: ignore
+        return adapter.search("/tmp/x.jpg")
+
+    def test_default_table(self):
+        got = self._parse(4)
+        assert [r.similarity for r in got] == [100.0, 95.0, 90.0, 85.0]
+
+    def test_custom_table(self):
+        got = self._parse(3, rank_scores="50,40,30")
+        assert [r.similarity for r in got] == [50.0, 40.0, 30.0]
+
+    def test_beyond_table_uses_last(self):
+        got = self._parse(4, rank_scores="50,40")
+        assert [r.similarity for r in got] == [50.0, 40.0, 40.0, 40.0]
+        # 注意：rank 模式下结果本来就按站点给的顺序，不重排
+
+    def test_empty_table_is_safe(self):
+        got = self._parse(2, rank_scores=",,,")
+        assert all(r.similarity == 0.0 for r in got)
+
+
+class TestRuntimeCapabilities:
+    def test_rate_limit_fields_present_in_both_adapters(self):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+        from imgsearch.engines.adapters.generic_json import GenericJson
+        for cls in (GenericJson, GenericHtml):
+            keys = {f.key for f in cls.CONFIG_SCHEMA}
+            for key in ("long_limit", "long_window", "short_limit",
+                        "short_window", "cloudflare_bypass", "follow_redirect",
+                        "step2_delay", "rank_scores"):
+                assert key in keys, f"{cls.NAME} 缺少 {key}"
+
+    def test_request_interval_from_short_window(self):
+        """SauceNAO 是 4 次/30 秒 → 每张间隔 7.5 秒"""
+        adapter = make_json(short_limit=4, short_window=30)
+        assert adapter.request_interval() == pytest.approx(7.5)
+
+    def test_request_interval_unlimited(self):
+        adapter = make_json(short_limit=0, short_window=30)
+        assert adapter.request_interval() == 0.0
+
+    def test_quota_state_empty_when_unlimited(self):
+        adapter = make_json(long_limit=0)
+        assert adapter.quota_state() == []
+
+    def test_quota_state_reports_when_limited(self, monkeypatch, tmp_path):
+        from imgsearch.engines import quota as quota_mod
+        monkeypatch.setattr(quota_mod, "_QUOTA_DIR", tmp_path, raising=False)
+        adapter = make_json(long_limit=100, long_window=86400)
+        adapter._quota = None
+        states = adapter.quota_state()
+        assert len(states) == 1
+        assert states[0].limit == 100

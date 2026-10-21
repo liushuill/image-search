@@ -17,7 +17,10 @@ from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import Field, Schema, STR
 
 # 相似度量纲：各站点的刻度完全不同，必须显式声明
-SCALES = ("0-100", "0-1", "percent-text", "none")
+SCALES = ("0-100", "0-1", "percent-text", "rank", "none")
+
+# 默认的「按排名估算」分值表（Danbooru 这类站点不返回相似度，只有排名）
+DEFAULT_RANK_SCORES = "100,95,90,85,80,75,70,65,60,55"
 
 # 字段映射的键（JSON 路径 / HTML 选择器 共用同一组名字）
 MAPPED_FIELDS = (
@@ -31,6 +34,49 @@ MAPPED_FIELDS = (
     ("field_thumbnail", "缩略图", "header.thumbnail", "td.image img@src"),
     ("field_detail", "备注", "", ""),
 )
+
+
+def apply_transforms(value: str, transforms: List[str]) -> str:
+    """
+    对取到的值做变换。写法：``path~strip_prefix:artist:``
+
+    支持的变换（够把现有引擎表达出来，且语法一眼能懂）：
+        strip_prefix:X   去掉前缀 X
+        strip_suffix:X   去掉后缀 X
+        regex:PATTERN    取第一个分组（没有分组则取整个匹配）
+    """
+    text = value or ""
+    for raw in transforms:
+        step = (raw or "").strip()
+        if not step:
+            continue
+        name, _, arg = step.partition(":")
+        name = name.strip().lower()
+        if name == "strip_prefix" and text.startswith(arg):
+            text = text[len(arg):]
+        elif name == "strip_suffix" and arg and text.endswith(arg):
+            text = text[: -len(arg)]
+        elif name == "regex":
+            try:
+                found = re.search(arg, text)
+            except re.error:
+                continue
+            if not found:
+                text = ""
+            elif found.groups():
+                text = found.group(1) or ""
+            else:
+                text = found.group(0)
+        text = text.strip()
+    return text
+
+
+def split_transform(spec: str):
+    """``"data.x~strip_prefix:a:"`` → ("data.x", ["strip_prefix:a:"])"""
+    if not spec:
+        return "", []
+    parts = spec.split("~")
+    return parts[0].strip(), [p for p in parts[1:]]
 
 
 def _absolute_url(url: str) -> str:
@@ -57,6 +103,36 @@ def mapping_schema(kind: str) -> Schema:
     return Schema(
         *[Field(key, label, STR, example, help=help_text, advanced=True)
           for key, label, example, _ in MAPPED_FIELDS]
+    )
+
+
+def runtime_schema(kind: str) -> Schema:
+    """两个适配器都需要的能力：限流、反爬、多步、按排名估算"""
+    from imgsearch.engines.schema import BOOL, FLOAT, INT
+
+    return Schema(
+        Field("long_limit", "长期限额", INT, 0,
+              help="窗口内最多请求次数；0 = 不限制", minimum=0, unit="次",
+              advanced=True),
+        Field("long_window", "长期窗口", INT, 86400,
+              help="默认 86400 秒 = 24 小时", minimum=0, unit="秒", advanced=True),
+        Field("short_limit", "短期限额", INT, 0,
+              help="0 = 不限制。填了会自动得出「每张之间等多久」",
+              minimum=0, unit="次", advanced=True),
+        Field("short_window", "短期窗口", INT, 30,
+              help="默认 30 秒", minimum=0, unit="秒", advanced=True),
+        Field("cloudflare_bypass", "Cloudflare 绕过", BOOL, False,
+              help="用 cloudscraper 发请求。仅当站点有 Cloudflare 反爬时需要",
+              advanced=True),
+        Field("follow_redirect", "跟随到结果页", BOOL, False,
+              help="有些站点 POST 之后会重定向到结果页，必须再 GET 一次才有内容",
+              advanced=True),
+        Field("step2_delay", "第二步等待", FLOAT, 0.0,
+              help="跟随到结果页之前等几秒（站点还在处理时用）",
+              minimum=0, unit="秒", advanced=True),
+        Field("rank_scores", "排名分值表", STR, DEFAULT_RANK_SCORES,
+              help="仅当「相似度量纲」= rank 时有效：按第 1、2、3…名依次给分，"
+                   "超出列表则用最后一个值", advanced=True),
     )
 
 
@@ -94,6 +170,21 @@ class DeclarativeEngine(SearchEngine):
     def _scale(self) -> str:
         scale = str(self.opt("similarity_scale", "0-100") or "0-100").strip()
         return scale if scale in SCALES else "0-100"
+
+    def _rank_similarity(self, index: int) -> float:
+        """按排名估算相似度（站点不返回相似度时用）"""
+        raw = str(self.opt("rank_scores", DEFAULT_RANK_SCORES) or "")
+        scores = []
+        for part in raw.split(","):
+            try:
+                scores.append(float(part.strip()))
+            except ValueError:
+                continue
+        if not scores:
+            return 0.0
+        if index < len(scores):
+            return scores[index]
+        return scores[-1]
 
     def _scale_similarity(self, raw: str) -> float:
         """
@@ -152,8 +243,56 @@ class DeclarativeEngine(SearchEngine):
             params["login"] = login
         return params, None
 
+    # ── 限流 ────────────────────────────────────
+
+    def _quota_obj(self):
+        """按引擎名建一个滑动窗口（跨进程有效，与内置引擎同一套实现）"""
+        if getattr(self, "_quota", None) is None:
+            from imgsearch.engines.quota import SlidingWindowQuota
+            limit = int(self.opt_int("long_limit", 0) or 0)
+            window = int(self.opt_int("long_window", 0) or 0)
+            if limit > 0 and window > 0:
+                self._quota = SlidingWindowQuota(self.NAME, limit=limit,
+                                                 window=window)
+            else:
+                self._quota = None
+        return self._quota
+
+    def quota_state(self):
+        quota = self._quota_obj()
+        return [quota.state()] if quota is not None else []
+
+    def request_interval(self) -> float:
+        """短期速率换算成「每张之间等多久」"""
+        limit = int(self.opt_int("short_limit", 0) or 0)
+        window = int(self.opt_int("short_window", 0) or 0)
+        if limit > 0 and window > 0:
+            return window / limit
+        return 0.0
+
+    def _session(self):
+        """按配置选普通会话还是 cloudscraper（绕 Cloudflare）"""
+        if self.opt_bool("cloudflare_bypass", False):
+            try:
+                import cloudscraper
+            except ImportError as e:
+                raise RuntimeError(
+                    "启用了「Cloudflare 绕过」但没装 cloudscraper。\n"
+                    "  安装：pip install cloudscraper"
+                ) from e
+            scraper = cloudscraper.create_scraper()
+            scraper.headers.update(self.headers or {})
+            if self.proxies:
+                scraper.proxies.update(self.proxies)
+            return scraper
+        return self.make_session()
+
     def _request(self, *, image_path: str = "", image_url: str = ""):
-        """发一次请求，返回 (响应的解析结果, 会话已关闭的原始文本)"""
+        """发一次请求，返回响应的原始文本"""
+        quota = self._quota_obj()
+        if quota is not None:
+            quota.check()
+
         method = self._method()
         endpoint = self._endpoint()
         extra_params, basic = self._auth_parts()
@@ -177,7 +316,7 @@ class DeclarativeEngine(SearchEngine):
         else:
             payload[self._url_field()] = image_url
 
-        session = self.make_session()
+        session = self._session()
         if basic is not None:
             from requests.auth import HTTPBasicAuth
             session.auth = HTTPBasicAuth(*basic)
@@ -190,6 +329,21 @@ class DeclarativeEngine(SearchEngine):
                                     files=files, data=data or None,
                                     timeout=self.timeout)
             resp.raise_for_status()
+
+            # 多步：有些站点 POST 之后会重定向到结果页，必须再 GET 一次才有内容
+            # （Ascii2D 就是这种：/search/file → /search/color/...）
+            if self.opt_bool("follow_redirect", False):
+                step2 = getattr(resp, "url", "") or ""
+                if step2 and step2 != endpoint:
+                    import time as _time
+                    delay = float(self.opt_float("step2_delay", 0.0) or 0.0)
+                    if delay > 0:
+                        _time.sleep(delay)
+                    resp = session.get(step2, timeout=self.timeout)
+                    resp.raise_for_status()
+
+            if quota is not None:
+                quota.record()
             return resp.text
         except Exception as e:                            # noqa: BLE001
             status = getattr(getattr(e, "response", None), "status_code", None)
@@ -207,33 +361,45 @@ class DeclarativeEngine(SearchEngine):
 
     # ── 结果组装 ────────────────────────────────
 
-    def _make_result(self, get_text, get_links) -> Optional[SearchResult]:
+    def _field_text(self, get_text, key: str) -> str:
+        """读一个文本字段并按 `~` 应用变换"""
+        base, transforms = split_transform(str(self.opt(key, "") or ""))
+        return apply_transforms(get_text(base), transforms)
+
+    def _make_result(self, get_text, get_links, index: int = 0) -> Optional[SearchResult]:
         """
         从一条记录里组装 SearchResult。
 
         Args:
-            get_text: ``(配置键) -> 文本``
-            get_links: ``(配置键) -> list[str]``
+            get_text: ``(取值表达式) -> 文本``
+            get_links: ``(取值表达式) -> list[str]``
+            index: 第几条（``similarity_scale = rank`` 时用它查分值表）
         """
-        raw_sim = get_text("field_similarity")
-        similarity = self._scale_similarity(raw_sim)
+        if self._scale() == "rank":
+            similarity = self._rank_similarity(index)
+        else:
+            raw_sim = self._field_text(get_text, "field_similarity")
+            similarity = self._scale_similarity(raw_sim)
 
         # 协议相对地址（``//konachan.com/x``）补成 https —— 很多图库这么写，
         # 不补的话在结果表里点不开
-        links = [_absolute_url(u) for u in get_links("field_urls") if u]
-        pixiv_id = get_text("field_pixiv_id")
+        links = [_absolute_url(u) for u in get_links(
+            split_transform(str(self.opt("field_urls", "") or ""))[0]) if u]
+        pixiv_id = self._field_text(get_text, "field_pixiv_id")
         # 有些站点只给 URL，不给 pixiv_id —— 交给 SearchResult 的归一化去补
         result = SearchResult(
             source=self.DISPLAY_NAME,
             similarity=similarity,
             pixiv_id=pixiv_id or None,
-            artist=get_text("field_artist") or None,
-            title=get_text("field_title") or None,
-            material=get_text("field_material") or None,
+            artist=self._field_text(get_text, "field_artist") or None,
+            title=self._field_text(get_text, "field_title") or None,
+            material=self._field_text(get_text, "field_material") or None,
             ext_urls=links,
-            highres_url=_absolute_url(get_text("field_highres")) or None,
-            thumbnail=_absolute_url(get_text("field_thumbnail")) or None,
-            detail=get_text("field_detail") or None,
+            highres_url=_absolute_url(
+                self._field_text(get_text, "field_highres")) or None,
+            thumbnail=_absolute_url(
+                self._field_text(get_text, "field_thumbnail")) or None,
+            detail=self._field_text(get_text, "field_detail") or None,
         )
         # 一条结果都没有任何有用信息时丢弃，避免污染结果表
         if not (result.artist or result.title or result.ext_urls

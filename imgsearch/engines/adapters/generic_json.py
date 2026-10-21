@@ -24,6 +24,7 @@ from imgsearch.engines.adapters.declarative import (
     SCALES,
     DeclarativeEngine,
     mapping_schema,
+    runtime_schema,
 )
 from imgsearch.engines.adapters.paths import dig_any, dig_links, dig_list
 from imgsearch.engines.base import SearchResult
@@ -72,6 +73,7 @@ class GenericJson(DeclarativeEngine):
                        "留空则不传", advanced=True),
         ),
         mapping_schema("json"),
+        runtime_schema("json"),
     )
 
     def _parse(self, raw: str) -> List[SearchResult]:
@@ -90,12 +92,12 @@ class GenericJson(DeclarativeEngine):
 
         rows = self._rows(data)
         # 文本字段支持回退链（a|b|c），链接字段会把所有候选都收下
-        get_text = lambda key: dig_any(row, self.opt(key, ""))       # noqa: E731
-        get_links = lambda key: dig_links(row, self.opt(key, ""))    # noqa: E731
+        get_text = lambda spec: dig_any(row, spec)       # noqa: E731
+        get_links = lambda spec: dig_links(row, spec)    # noqa: E731
 
         results: List[SearchResult] = []
-        for row in rows:
-            record = self._make_result(get_text, get_links)
+        for index, row in enumerate(rows):
+            record = self._make_result(get_text, get_links, index)
             if record is not None:
                 results.append(record)
         results.sort(key=lambda r: r.similarity, reverse=True)

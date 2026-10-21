@@ -25,6 +25,7 @@ from imgsearch.engines.adapters.declarative import (
     SCALES,
     DeclarativeEngine,
     mapping_schema,
+    runtime_schema,
 )
 from imgsearch.engines.base import SearchResult
 from imgsearch.engines.schema import COMMON_SCHEMA, STR, Field, Schema
@@ -71,6 +72,7 @@ class GenericHtml(DeclarativeEngine):
                   help="percent-text 会从 `89%` 这样的文本里取出数字"),
         ),
         mapping_schema("html"),
+        runtime_schema("html"),
     )
 
     def _parse(self, raw: str) -> List[SearchResult]:
@@ -119,10 +121,10 @@ class GenericHtml(DeclarativeEngine):
             return []
 
         results: List[SearchResult] = []
-        for node in rows:
-            get_text = lambda key, _n=node: dom.extract(_n, self.opt(key, ""))       # noqa: E731
-            get_links = lambda key, _n=node: dom.extract_links(_n, self.opt(key, ""))  # noqa: E731
-            record = self._make_result(get_text, get_links)
+        for index, node in enumerate(rows):
+            get_text = lambda spec, _n=node: dom.extract(_n, spec)        # noqa: E731
+            get_links = lambda spec, _n=node: dom.extract_links(_n, spec)  # noqa: E731
+            record = self._make_result(get_text, get_links, index)
             if record is not None:
                 results.append(record)
         results.sort(key=lambda r: r.similarity, reverse=True)
