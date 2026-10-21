@@ -16,8 +16,8 @@ from imgsearch.engines.base import SearchResult  # noqa: E402
 
 
 class TestMainWindow:
-    EXPECTED = ["SearchPage", "LibraryPage", "CleanupPage", "EnginesPage",
-                "CredentialsPage", "SettingsPage"]
+    EXPECTED = ["SearchPage", "LibraryPage", "LibraryBrowserPage",
+                "CleanupPage", "EnginesPage", "CredentialsPage", "SettingsPage"]
 
     def test_all_pages_present(self, qapp):
         from imgsearch_gui.main_window import MainWindow

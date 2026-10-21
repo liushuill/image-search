@@ -148,6 +148,8 @@ class RemovePathDialog(QtWidgets.QDialog):
 
 
 class LibraryPage(QtWidgets.QWidget):
+    # 请求切到「浏览」页（由主窗口接住并 go_to）
+    browse_requested = QtCore.Signal()
     """图库路径管理"""
 
     changed = QtCore.Signal()

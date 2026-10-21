@@ -318,22 +318,30 @@ class TestResultTableThumbnails:
 
 
 class TestLibraryBrowser:
-    def _dialog(self, library):
-        from imgsearch.library.paths import RootManager
-        from imgsearch_gui.dialogs.library_browser import LibraryBrowserDialog
+    """
+    缩略图墙现在是**独立页面**（侧栏「浏览」），不再是弹窗 ——
+    弹窗要开/关，也没法反复对照。
+    """
+
+    def _page(self, library):
+        from imgsearch_gui.pages.library_browser_page import LibraryBrowserPage
+        page = LibraryBrowserPage()
+        # 页面自己会 open_library()；测试里直接注入 fixture 的库
         db, store = library
-        return LibraryBrowserDialog(db, store, RootManager(db).list())
+        page._db, page._store = db, store
+        return page
 
     def test_lists_images(self, qapp, library, pattern_image):
         db, store = library
         for i in range(3):
             store.upsert_image(str(pattern_image(f"p{i}.png", seed=300 + i)))
-        dlg = self._dialog(library)
+        page = self._page(library)
         try:
-            assert dlg.model.rowCount() == 3
-            assert "共 3 张" in dlg.status.text()
+            page.reload()
+            assert page.model.rowCount() == 3
+            assert "共 3 张" in page.status.text()
         finally:
-            dlg._thumbs.stop()
+            page._thumbs.stop()
 
     def test_search_filters(self, qapp, library, pattern_image):
         db, store = library
@@ -341,25 +349,27 @@ class TestLibraryBrowser:
         # 会被 upsert_image 视为同一张图（内容才是身份），于是只留一条记录
         for name, seed in (("alpha.png", 310), ("beta.png", 311)):
             store.upsert_image(str(pattern_image(name, seed=seed)))
-        dlg = self._dialog(library)
+        page = self._page(library)
         try:
-            dlg.search_edit.setText("alpha")
-            assert dlg.model.rowCount() == 1
-            dlg.search_edit.clear()
-            assert dlg.model.rowCount() == 2
+            page.reload()
+            page.search_edit.setText("alpha")
+            assert page.model.rowCount() == 1
+            page.search_edit.clear()
+            assert page.model.rowCount() == 2
         finally:
-            dlg._thumbs.stop()
+            page._thumbs.stop()
 
     def test_item_carries_dhash_and_path(self, qapp, library, pattern_image):
         db, store = library
         rec = store.upsert_image(str(pattern_image("one.png", seed=320)))
-        dlg = self._dialog(library)
+        page = self._page(library)
         try:
-            item = dlg.model.item(0)
+            page.reload()
+            item = page.model.item(0)
             assert item.data(QtCore.Qt.UserRole) == rec.dhash
             assert item.data(QtCore.Qt.UserRole + 1) == rec.abs_path
         finally:
-            dlg._thumbs.stop()
+            page._thumbs.stop()
 
     def test_missing_files_flagged(self, qapp, library, pattern_image):
         db, store = library
@@ -368,19 +378,21 @@ class TestLibraryBrowser:
         import os
         os.remove(p)
         store.roots.refresh_missing()
-        dlg = self._dialog(library)
+        page = self._page(library)
         try:
-            assert "已不在原位置" in dlg.model.item(0).toolTip()
+            page.reload()
+            assert "已不在原位置" in page.model.item(0).toolTip()
         finally:
-            dlg._thumbs.stop()
+            page._thumbs.stop()
 
     def test_empty_library_is_graceful(self, qapp, library):
-        dlg = self._dialog(library)
+        page = self._page(library)
         try:
-            assert dlg.model.rowCount() == 0
-            assert "共 0 张" in dlg.status.text()
+            page.reload()
+            assert page.model.rowCount() == 0
+            assert "图库里还没有图片" in page.status.text()
         finally:
-            dlg._thumbs.stop()
+            page._thumbs.stop()
 
 
 class TestLibraryStoreListImages:
@@ -430,3 +442,115 @@ class TestLibraryStoreListImages:
         os.remove(p)
         store.roots.refresh_missing()
         assert len(store.list_images(only_missing=True)) == 1
+
+
+class TestBrowserPageLifecycle:
+    """
+    浏览页是独立页面（不是弹窗），所以它必须在**每次被展示时**刷新 ——
+    用户可能刚搜完图、刚批量识别过，或在清理页删过东西。
+    """
+
+    def test_on_shown_loads_the_library(self, qapp, library, pattern_image, monkeypatch):
+        from imgsearch_gui.pages import library_browser_page as mod
+
+        db, store = library
+        for i in range(2):
+            store.upsert_image(str(pattern_image(f"x{i}.png", seed=600 + i)))
+
+        page = mod.LibraryBrowserPage()
+        try:
+            # on_shown 会自己 open_library()，测试里把它指到 fixture 的库
+            monkeypatch.setattr("imgsearch.service.open_library",
+                                lambda *a, **k: (db, store))
+            monkeypatch.setattr(
+                "imgsearch.library.paths.RootManager.list",
+                lambda self: [])
+            page.on_shown()
+            assert page.model.rowCount() == 2
+            assert "共 2 张" in page.status.text()
+        finally:
+            page._thumbs.stop()
+
+    def test_on_shown_prevents_stale_data(self, qapp, library, pattern_image, monkeypatch):
+        """切走再切回，必须看到新数据而不是上次的快照"""
+        from imgsearch_gui.pages import library_browser_page as mod
+
+        db, store = library
+        store.upsert_image(str(pattern_image("first.png", seed=610)))
+
+        page = mod.LibraryBrowserPage()
+        try:
+            monkeypatch.setattr("imgsearch.service.open_library",
+                                lambda *a, **k: (db, store))
+            monkeypatch.setattr(
+                "imgsearch.library.paths.RootManager.list",
+                lambda self: [])
+            page.on_shown()
+            assert page.model.rowCount() == 1
+
+            store.upsert_image(str(pattern_image("second.png", seed=611)))
+            page.on_shown()
+            assert page.model.rowCount() == 2, "再次进入应当刷新"
+        finally:
+            page._thumbs.stop()
+
+    def test_shows_hint_when_library_disabled(self, qapp, monkeypatch):
+        from imgsearch_gui.pages import library_browser_page as mod
+
+        page = mod.LibraryBrowserPage()
+        try:
+            monkeypatch.setattr("imgsearch.service.open_library",
+                                lambda *a, **k: (None, None))
+            page.on_shown()
+            assert "图库未启用" in page.status.text() or "无法打开" in page.status.text()
+        finally:
+            page._thumbs.stop()
+
+
+class TestNavigationRefreshesBrowser:
+    """
+    主窗口切页时要调用新页面的 on_shown ——
+    否则浏览页会一直显示"切到本页时会自动读取图库"的占位。
+    """
+
+    def test_go_to_calls_on_shown(self, qapp, monkeypatch):
+        from imgsearch_gui.main_window import MainWindow
+        from imgsearch_gui.pages import library_browser_page as mod
+
+        called = {"n": 0}
+        original = mod.LibraryBrowserPage.on_shown
+
+        def spy(self):
+            called["n"] += 1
+            original(self)
+
+        monkeypatch.setattr(mod.LibraryBrowserPage, "on_shown", spy)
+        win = MainWindow()
+        try:
+            index = win.pages.indexOf(win.browser_page)
+            win.go_to(index)
+            qapp.processEvents()
+            assert called["n"] >= 1
+        finally:
+            win.close()
+
+    def test_browser_page_is_in_the_nav(self, qapp):
+        from imgsearch_gui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            names = [b.text() for b in win._navs]
+            assert "浏览" in names
+            assert win.pages.indexOf(win.browser_page) > 0
+        finally:
+            win.close()
+
+    def test_library_page_button_navigates(self, qapp):
+        from imgsearch_gui.main_window import MainWindow
+        win = MainWindow()
+        try:
+            win.go_to(win.pages.indexOf(win.library_page))
+            win.library_page.browse_requested.emit()
+            qapp.processEvents()
+            assert win.pages.currentWidget() is win.browser_page
+        finally:
+            win.close()

@@ -256,6 +256,22 @@ meta    (key, value)                                   内部元信息
 
 ---
 
+## 仓库里入库什么、不入库什么
+
+`git archive`（也就是推上去的整包）只含**源码 + 模板 + 占位符**：
+
+| 入库 | 不入库（`.gitignore`） |
+|---|---|
+| `imgsearch/` `imgsearch_gui/` `tests/` `plans/` | `.env`（含真实凭据） |
+| `config.json`（**无密钥**，只有引擎设置） | `data/` 下所有真实数据：SQLite 库、`thumbs/`、`cache/`、额度账本、备份 |
+| `data/.gitkeep` `output/.gitkeep`（空目录占位） | `output/` 下导出的结果 |
+| `.env.example` `requirements*.txt` 启动脚本 | `.venv/` `__pycache__/` `.pytest_cache/` |
+| `docs/`（留给真正的文档） | `docs/reference/`（从网页保存的参考素材，可重新获取） |
+
+> 早期那两份 Danbooru 参考网页直接躺在 `docs/` 里，**只是碰巧**被
+> `*Danbooru.html` 通配规则忽略。现在统一挪到 `docs/reference/` 并加了
+> **目录级**规则——`docs/` 从此可以放心放真文档，它会正常入库、能被 diff。
+
 ## 界面预览
 
 三处「看图」的地方：
@@ -263,7 +279,7 @@ meta    (key, value)                                   内部元信息
 | 位置 | 能做什么 |
 |---|---|
 | **搜索结果表** | 首列「预览」显示该条命中的图源缩略图，一眼看出哪个匹配是对的 |
-| **图库页 →「浏览图库…」** | 缩略图墙：按路径/文件名筛选，双击打开，右键复制路径 |
+| **侧栏「浏览」页** | 缩略图墙：按路径/文件名筛选，双击打开，右键复制路径。<br>**每次切到本页都会自动刷新**（刚搜完图/刚批量识别过都能立刻看到） |
 | **图库页 →「识别未搜索的图…」** | 开跑前列出**具体哪些图**，可取消勾选排除、按名字筛选、全选/全不选/反选 |
 
 缩略图都在后台线程生成，并落盘缓存（本地图复用按内容命名的
@@ -524,7 +540,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（680 项）
+├── tests/                     ← pytest（686 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -630,7 +646,7 @@ image-search/
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **680 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **686 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -644,7 +660,7 @@ image-search/
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **680 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **686 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象

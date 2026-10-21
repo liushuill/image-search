@@ -172,15 +172,17 @@ class TestMainWindowNavigationGuard:
         from imgsearch_gui.main_window import MainWindow
         win = MainWindow()
         try:
-            win.go_to(3)                                  # 引擎页
+            win.go_to(win.pages.indexOf(win.engines_page))   # 引擎页
             engines = win.engines_page
             engines._form._widgets["timeout"].setValue(88)
             assert engines._dirty is True
 
             answer_dialog("取消")
             win.go_to(0)                                  # 试图去搜索页
-            assert win.pages.currentIndex() == 3, "取消后不该离开引擎页"
-            assert win._navs[3].isChecked(), "导航高亮应留在引擎页"
+            assert win.pages.currentIndex() == win.pages.indexOf(
+                win.engines_page), "取消后不该离开引擎页"
+            engines_idx = win.pages.indexOf(win.engines_page)
+            assert win._navs[engines_idx].isChecked(), "导航高亮应留在引擎页"
         finally:
             win.close()
 
@@ -188,7 +190,7 @@ class TestMainWindowNavigationGuard:
         from imgsearch_gui.main_window import MainWindow
         win = MainWindow()
         try:
-            win.go_to(3)
+            win.go_to(win.pages.indexOf(win.engines_page))
             win.engines_page._form._widgets["timeout"].setValue(88)
             answer_dialog("丢弃修改")
             win.go_to(0)
@@ -202,7 +204,8 @@ class TestMainWindowNavigationGuard:
         try:
             win._goto_credentials("SAUCENAO_KEY")
             assert isinstance(win.pages.currentWidget(), type(win.credentials_page))
-            assert win.pages.currentIndex() == 4
+            assert win.pages.currentIndex() == win.pages.indexOf(
+                win.credentials_page), "应当切到凭据页"
         finally:
             win.close()
 

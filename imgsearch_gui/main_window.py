@@ -9,6 +9,7 @@ from imgsearch.engines.store import get_store
 from imgsearch_gui.pages.credentials_page import CredentialsPage
 from imgsearch_gui.pages.engines_page import EnginesPage
 from imgsearch_gui.pages.cleanup_page import CleanupPage
+from imgsearch_gui.pages.library_browser_page import LibraryBrowserPage
 from imgsearch_gui.pages.library_page import LibraryPage
 from imgsearch_gui.pages.search_page import SearchPage
 from imgsearch_gui.pages.settings_page import SettingsPage
@@ -59,6 +60,7 @@ class MainWindow(QtWidgets.QMainWindow):
         specs = [
             ("搜索", SearchPage),
             ("图库", LibraryPage),
+            ("浏览", LibraryBrowserPage),
             ("清理", CleanupPage),
             ("引擎", EnginesPage),
             ("凭据", CredentialsPage),
@@ -101,10 +103,15 @@ class MainWindow(QtWidgets.QMainWindow):
         # 页面联动
         self.search_page = self.pages.widget(0)
         self.library_page = self.pages.widget(1)
-        self.cleanup_page = self.pages.widget(2)
-        self.engines_page = self.pages.widget(3)
-        self.credentials_page = self.pages.widget(4)
-        self.settings_page = self.pages.widget(5)
+        self.browser_page = self.pages.widget(2)
+        self.cleanup_page = self.pages.widget(3)
+        self.engines_page = self.pages.widget(4)
+        self.credentials_page = self.pages.widget(5)
+        self.settings_page = self.pages.widget(6)
+
+        # 图库页的「浏览图库」不再开弹窗，直接切到浏览页
+        self.library_page.browse_requested.connect(
+            lambda: self.go_to(self.pages.indexOf(self.browser_page)))
 
         # 引擎/凭据/设置变化 → 刷新搜索页的引擎下拉与状态条
         self.engines_page.changed.connect(self._on_config_changed)
@@ -180,13 +187,22 @@ class MainWindow(QtWidgets.QMainWindow):
         self.pages.setCurrentIndex(index)
         self._sync_nav(index)
 
+        # 通知新页面「你被展示了」—— 浏览页靠这个刷新
+        # （用户可能刚搜完图、刚批量识别过，或在清理页删过东西）
+        page = self.pages.widget(index)
+        on_shown = getattr(page, "on_shown", None)
+        if callable(on_shown):
+            on_shown()
+
     def _sync_nav(self, index: int) -> None:
         for i, btn in enumerate(self._navs):
             btn.setChecked(i == index)
 
     def _goto_credentials(self, env_name: str = "") -> None:
         """从引擎页跳来填凭据"""
-        self.go_to(4)
+        # ⚠️ 用 indexOf 而不是写死序号：加页/调序后写死的那个会指错页面
+        # （加了「浏览」页之后就发生过一次）
+        self.go_to(self.pages.indexOf(self.credentials_page))
         row = self.credentials_page.rows.get(env_name)
         if row is not None:
             row.edit.setFocus()
