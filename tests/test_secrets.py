@@ -211,7 +211,8 @@ class TestDeclaredSecrets:
         from imgsearch.service import declared_secrets
         specs = {c.env_name: c for c in declared_secrets()}
         key = specs["DANBOORU_API_KEY"]
-        assert "Danbooru" in key.title        # 来自引擎 schema 的展示名
+        assert key.group == "Danbooru"        # 归属哪个引擎（用于分组）
+        assert key.title == "API Key"         # 字段自己的标签
         assert key.required is True           # 与运行时的强制一致
 
     def test_required_matches_runtime_enforcement(self):

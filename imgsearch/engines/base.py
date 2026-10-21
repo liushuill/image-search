@@ -266,6 +266,24 @@ class SearchEngine:
         merged.update(payload)
         return merged
 
+    @property
+    def uses_api_key(self) -> bool:
+        """
+        本次是否要使用凭据。
+
+        配置里「使用 API Key」关掉 → False（引擎应跳过凭据、按匿名处理）。
+        ``AUTH_MODE == "none"`` 的引擎恒为 False —— 它本来就没有凭据可发。
+        """
+        if self.AUTH_MODE == "none":
+            return False
+        return self.opt_bool("use_api_key", True)
+
+    @property
+    def auth_label(self) -> str:
+        """给界面显示的一句话"""
+        return {"required": "必须凭据", "optional": "可选凭据",
+                "none": "无需凭据"}.get(self.AUTH_MODE, self.AUTH_MODE)
+
     def quota_state(self) -> List[QuotaState]:
         """
         本引擎当前的额度状态；默认表示「无限制」。
@@ -318,6 +336,12 @@ class SearchEngine:
     def name(self) -> str:
         """引擎名称（优先用注册名，便于配置与日志一致）"""
         return self.NAME or self.__class__.__name__
+
+    # 凭据需求，三档统一约定（所有引擎都声明它，即使值是 none）：
+    #   required —— 没有凭据就完全不能用（如 SauceNAO）
+    #   optional —— 没有凭据能用一部分（如 Danbooru：只能搜公网 URL）
+    #   none     —— 本来就不需要凭据（如 IQDB / Ascii2D / TraceMoe）
+    AUTH_MODE = "required"
 
     # 使用须知：启用这个引擎前需要满足的前提条件。
     # 会在 `engines list` 的备注列、`engines show` 与 GUI 引擎页显示 ——

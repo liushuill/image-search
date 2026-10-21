@@ -1153,7 +1153,22 @@ class {cls}(SearchEngine):
     # 需要账号才能用的话改成 False
     ENABLED_BY_DEFAULT = True
 
+    # 凭据需求 —— 统一模板要求**每个引擎都声明它**：
+    #   "required" 没有凭据就完全不能用
+    #   "optional" 没有凭据能用一部分（例如只能搜公网 URL）
+    #   "none"     本来就不需要凭据（下面没有 secret 字段就选它）
+    AUTH_MODE = "none"
+
     # 配置字段：界面与 CLI 都按这张表自动生成
+    #
+    # 需要凭据的话，在这里加一个 secret 字段 —— 它会自动出现在「凭据」页、
+    # 写进 .env（0600），并在引擎页变成只读：
+    #     Field("api_key", "API Key", SECRET, "",
+    #           env_var="MYSITE_API_KEY", required=True)
+    # 同时把上面的 AUTH_MODE 改成 "required" 或 "optional"。
+    #
+    # COMMON_SCHEMA 已提供公共字段：启用 / 使用 API Key / API 地址 /
+    # 最低相似度 / 代理 / 请求间隔 / 超时 / 自定义请求头与查询参数。
     CONFIG_SCHEMA = COMMON_SCHEMA.extend(
         Schema(
             Field("some_option", "示例选项", INT, 10,

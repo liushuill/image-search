@@ -540,7 +540,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（686 项）
+├── tests/                     ← pytest（718 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -568,6 +568,59 @@ image-search/
 
 依赖是否齐备靠「能不能 import 哨兵包」判断（`requests` / `PySide6`），
 而不是靠标记文件 —— 标记文件会跟实际状态不一致。
+
+### 引擎的统一模板
+
+**每个引擎都声明同一组类属性**（内置引擎与自定义引擎一致）：
+
+```python
+class MyEngine(SearchEngine):
+    NAME = "mysite"                    # 配置里的稳定标识（改名=新引擎）
+    DISPLAY_NAME = "MySite"            # 界面显示名
+    DEFAULT_API_URL = "https://…"      # 站点地址（用户可覆盖）
+    DEFAULT_ORDER = 60                 # 权重顺序
+    ENABLED_BY_DEFAULT = False         # 新装环境是否默认启用
+    AUTH_MODE = "required"             # 凭据需求，见下
+    CONFIG_SCHEMA = COMMON_SCHEMA.extend(Schema(...))
+```
+
+#### `AUTH_MODE`：凭据需求三档
+
+| 值 | 含义 | 本项目里 |
+|---|---|---|
+| `required` | 没有凭据完全不能用 | SauceNAO |
+| `optional` | 没有凭据能用一部分 | Danbooru（只能搜公网 URL） |
+| `none` | 本来就不需要凭据 | IQDB / Ascii2D / TraceMoe |
+
+引擎页会显示「凭据：必须 / 可选 / 无需」。
+
+#### 「使用 API Key」开关（`use_api_key`）
+
+在 `COMMON_SCHEMA` 里，所以**所有引擎同一套模板都有它**。但：
+
+- 只有声明了 `secret` 字段的引擎才在界面上显示这个开关
+  （对 IQDB 这类显示一个永远用不上的开关是噪声）
+- 关掉之后：
+  - **该引擎的凭据从「凭据」页消失**（这正是这个开关的用途：我不打算给它填凭据）
+  - 引擎按匿名处理（`uses_api_key` 为 False，不发送凭据）
+  - `required` 引擎会**立刻明确报错**并说明是哪个开关关掉了 ——
+    而不是构造成功、请求时才给一个莫名的 HTTP 错误
+
+> ⚠️ 关掉 Danbooru 的开关**不能**让本地文件也能搜：匿名
+> `POST /iqdb_queries.json` 实测返回 403 CSRF，只有匿名 `GET ?url=` 可用。
+
+#### 凭据页按引擎分组
+
+凭据页的条目从各引擎的 schema 自动推导（不是手写清单），
+声明了 `secret` 字段的引擎会自动多出一个分组：
+
+```
+┌ SauceNAO（Pixiv 覆盖最好） ───── [必填] 打码
+│  API Key        [____________]
+├ Danbooru ────────────────────── [必填] 打码
+│  API Key        [____________]
+│  用户名          [liushuill___]   （明文，便于核对）
+```
 
 ### 加一个搜索引擎
 
@@ -646,7 +699,7 @@ image-search/
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **686 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **718 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -660,7 +713,7 @@ image-search/
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **686 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **718 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象

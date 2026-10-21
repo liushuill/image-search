@@ -43,6 +43,9 @@ class TraceMoe(SearchEngine):
     # （实测一张插画被匹配到某动画 80.3%）。需要时用 `-e traceMoe` 手动调用。
     ENABLED_BY_DEFAULT = False
 
+    # 统一模板要求每个引擎声明凭据需求：本引擎不需要凭据
+    AUTH_MODE = "none"
+
     CONFIG_SCHEMA = COMMON_SCHEMA.extend(
         Schema(
             Field("long_limit", "限额", INT, DEFAULT_LIMIT,

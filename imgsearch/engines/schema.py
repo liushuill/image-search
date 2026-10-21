@@ -249,6 +249,12 @@ class Schema:
 COMMON_SCHEMA = Schema(
     Field("enabled", "启用", BOOL, True,
           help="关闭后按顺序搜索时会跳过该引擎"),
+    # 统一开关：只有声明了 secret 字段的引擎才真正用得上它。
+    # 放在 COMMON_SCHEMA 里是为了「所有引擎同一套模板」——
+    # 界面会在引擎没有凭据字段时把它隐藏（见 SchemaForm）。
+    Field("use_api_key", "使用 API Key", BOOL, True,
+          help="关闭后不发送凭据（仅对支持匿名访问的引擎有意义）。\n"
+               "需要认证的引擎关掉后会直接报错并说明原因"),
     Field("api_url", "API 地址", STR, "",
           help="留空则使用引擎内置的默认地址",
           placeholder="https://example.com/search"),

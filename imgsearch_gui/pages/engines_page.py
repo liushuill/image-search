@@ -326,6 +326,11 @@ class EnginesPage(QtWidgets.QWidget):
             "类型：" + ("内置" if ec.is_builtin else "自定义"),
             "状态：" + ("已启用" if ec.enabled else "已禁用"),
         ]
+        # 凭据需求（统一模板里每个引擎都必须声明 AUTH_MODE）
+        mode = getattr(cls, "AUTH_MODE", "") if cls is not None else ""
+        if mode:
+            bits.append("凭据：" + {"required": "必须", "optional": "可选",
+                                    "none": "无需"}.get(mode, mode))
         if not ec.is_builtin:
             bits.append(f"模块：{ec.module_path or '(未设置)'}::{ec.class_name or '(未设置)'}")
         if cls is None:

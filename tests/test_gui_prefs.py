@@ -270,9 +270,9 @@ class TestCredentialsPage:
         """
         from imgsearch_gui.pages.credentials_page import CredentialsPage
         page = CredentialsPage()
-        sauce = page.rows["SAUCENAO_KEY"].title
-        assert "SauceNAO" in sauce and "API Key" in sauce
-        assert "Danbooru" in page.rows["DANBOORU_API_KEY"].title
+        # 引擎名不再拼进标题，而是作为**分组**（凭据页按引擎分组显示）
+        assert page.rows["SAUCENAO_KEY"].title == "API Key"
+        assert "Danbooru" in page.rows["DANBOORU_API_KEY"].group
 
     def test_shows_required_badge(self, qapp):
         """必填与否必须看得见，否则用户会跳过必填项然后撞报错"""

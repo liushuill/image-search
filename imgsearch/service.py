@@ -48,6 +48,8 @@ class CredentialSpec:
     description: str = ""
     required: bool = False
     mask: bool = True
+    # 归属哪个引擎（凭据页按它分组）；空串表示「其他/全局」
+    group: str = ""
 
 
 def declared_secrets() -> List[CredentialSpec]:
@@ -84,16 +86,29 @@ def declared_secrets() -> List[CredentialSpec]:
                 schema = ec.schema()
             except Exception:                             # noqa: BLE001
                 continue
-            for f in schema:
-                if not f.is_secret:
-                    continue
+            secrets_of_engine = [f for f in schema if f.is_secret]
+            if not secrets_of_engine:
+                continue
+
+            # 关掉「使用 API Key」的引擎不该在凭据页占位置 ——
+            # 这个开关的用途正是「我不打算给这个引擎填凭据」。
+            # ⚠️ 必须「先删掉兜底条目」而不是简单 continue：
+            # KNOWN_SECRETS 那一步已经把它们加进去了，只跳过引擎的话
+            # 条目会残留（就是漏了这一步才出的 bug）。
+            if not ec.get("use_api_key", True):
+                for f in secrets_of_engine:
+                    declared.pop(env_var_for(ec.name, f), None)
+                continue
+
+            for f in secrets_of_engine:
                 env_name = env_var_for(ec.name, f)
                 declared[env_name] = CredentialSpec(
                     env_name=env_name,
-                    title=f"{ec.display_name} · {f.label}",
+                    title=f.label,
                     description=f.help or f"由引擎「{ec.display_name}」使用",
                     required=bool(getattr(f, "required", False)),
                     mask=bool(getattr(f, "mask", True)),
+                    group=ec.display_name,
                 )
 
     return list(declared.values())

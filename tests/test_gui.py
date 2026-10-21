@@ -75,9 +75,29 @@ class TestSchemaForm:
             # schema 里声明的**非凭据**字段应全部出现在表单里。
             # 凭据字段刻意排除：它们只读、由「凭据」页写入 .env，
             # 不允许从引擎页产生第二个真值来源。
+            # 「使用 API Key」只在引擎真的声明了 secret 字段时显示 ——
+            # 它在 COMMON_SCHEMA 里是为了「所有引擎同一套模板」，
+            # 但对 IQDB 这类没有凭据的引擎，显示一个永远用不上的开关是噪声。
+            has_secrets = any(f.is_secret for f in ec.schema())
             expected = {f.key for f in ec.schema()
-                        if f.key not in ("enabled", "priority") and not f.is_secret}
+                        if f.key not in ("enabled", "priority")
+                        and not f.is_secret
+                        and not (f.key == "use_api_key" and not has_secrets)}
             assert set(values) == expected, f"{ec.name} 表单字段缺失"
+
+    def test_use_api_key_hidden_for_engines_without_credentials(self, qapp, store):
+        from imgsearch_gui.widgets.schema_form import SchemaForm
+        for name in ("iqdb", "ascii2d", "traceMoe"):
+            ec = store.get(name)
+            form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
+            assert "use_api_key" not in form._widgets, f"{name} 不该显示这个开关"
+
+    def test_use_api_key_shown_for_engines_with_credentials(self, qapp, store):
+        from imgsearch_gui.widgets.schema_form import SchemaForm
+        for name in ("sauceNAO", "danbooru"):
+            ec = store.get(name)
+            form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
+            assert "use_api_key" in form._widgets, f"{name} 应当有这个开关"
 
     def test_values_round_trip(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm

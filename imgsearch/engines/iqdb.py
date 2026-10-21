@@ -91,6 +91,9 @@ class Iqdb(SearchEngine):
     # 免费无凭据，开箱可用
     ENABLED_BY_DEFAULT = True
 
+    # 统一模板要求每个引擎声明凭据需求：本引擎不需要凭据
+    AUTH_MODE = "none"
+
     CONFIG_SCHEMA = COMMON_SCHEMA.extend(
         Schema(
             Field("services", "搜索的图库", STR, DEFAULT_SERVICES,

@@ -33,6 +33,10 @@ class SauceNAO(SearchEngine):
     DEFAULT_API_URL = "https://saucenao.com/search.php"
     DEFAULT_ORDER = 10
 
+    # 统一模板要求每个引擎声明凭据需求
+    AUTH_MODE = "required"
+    ENABLED_BY_DEFAULT = True
+
     # 滑动窗口限额追踪文件
     _QUOTA_FILE = PROJECT_DIR / "data" / "saucenao_quota.json"
 
@@ -84,6 +88,12 @@ class SauceNAO(SearchEngine):
 
         # 留空则回退到 .env 中的 SAUCENAO_KEY
         self.api_key = self.api_key or secrets.get("SAUCENAO_KEY", "") or ""
+        if not self.uses_api_key:
+            raise ValueError(
+                "该引擎必须使用 API Key，但配置里「使用 API Key」已关闭。\n"
+                "  1. 在引擎页勾选「使用 API Key」\n"
+                "  2. 或者停用这个引擎（它没凭据就完全无法工作）"
+            )
         if not self.api_key:
             raise ValueError(
                 "SauceNAO API Key 未配置！\n"

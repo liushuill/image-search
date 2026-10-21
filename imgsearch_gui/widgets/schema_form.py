@@ -77,7 +77,13 @@ class SchemaForm(QtWidgets.QWidget):
         outer.addWidget(advanced_box)
 
         has_advanced = False
+        # 「使用 API Key」只有在引擎真的声明了 secret 字段时才有意义。
+        # 放在 COMMON_SCHEMA 里是为了所有引擎同一套模板；
+        # 这里按引擎实际需要把它藏掉，避免 IQDB 这类显示一个永远用不上的开关。
+        has_secrets = any(getattr(f, "is_secret", False) for f in schema)
         for f in schema:
+            if f.key == "use_api_key" and not has_secrets:
+                continue
             if f.key in ("enabled", "priority"):
                 continue
             target = adv_lay if f.advanced else basic_lay

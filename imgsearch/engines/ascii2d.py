@@ -43,6 +43,9 @@ class Ascii2D(SearchEngine):
     # 保留实现以便日后站点恢复，需要时用 `-e ascii2d` 手动调用。
     ENABLED_BY_DEFAULT = False
 
+    # 统一模板要求每个引擎声明凭据需求：本引擎不需要凭据
+    AUTH_MODE = "none"
+
     CONFIG_SCHEMA = COMMON_SCHEMA.extend(
         Schema(
             Field("bypass_cfw", "Cloudflare 反爬绕过", BOOL, False,

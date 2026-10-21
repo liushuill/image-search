@@ -35,6 +35,9 @@ class Danbooru(SearchEngine):
     # 需要账号才能用，默认不启用，避免开箱即报错
     ENABLED_BY_DEFAULT = False
 
+    # 可选：带上凭据能上传本地文件；不带凭据只能搜公网 URL
+    AUTH_MODE = "optional"
+
     # 默认停用：它的以图搜图端点要求一把**未受限**的 API Key，门槛比别的引擎高。
     # 代码保留着 —— 有满足条件账号的人启用即可（见 USAGE_NOTE）。
     USAGE_NOTE = (
@@ -77,13 +80,17 @@ class Danbooru(SearchEngine):
             self.api_key or secrets.get("DANBOORU_API_KEY", "") or ""
         )
 
-        if not self.login:
+        if not self.uses_api_key:
+            # 匿名模式：清掉凭据，后续请求不带 auth
+            self.login = ""
+            self.api_key = ""
+        elif not self.login:
             raise ValueError(
                 "Danbooru 用户名未配置！\n"
                 "  1. 在引擎配置的「用户名」字段填入 Danbooru 账号\n"
                 "  2. 或写入 .env：DANBOORU_LOGIN=你的用户名"
             )
-        if not self.api_key:
+        elif not self.api_key:
             raise ValueError(
                 "Danbooru API Key 未配置！\n"
                 "  1. https://danbooru.donmai.us/profile → API Key\n"
@@ -151,8 +158,11 @@ class Danbooru(SearchEngine):
         """调用 Danbooru IQDB API"""
         session = self.make_session()
 
-        # HTTP Basic Auth (login:api_key)
-        session.auth = HTTPBasicAuth(self.login, self.api_key)
+        # 只有真的要发凭据时才挂 BasicAuth；
+        # 匿名模式（AUTH_MODE=optional 且「使用 API Key」关闭）不带凭据，
+        # 此时只能走 GET ?url=（POST 上传需要认证，实测匿名会 403 CSRF）
+        if self.login and self.api_key:
+            session.auth = HTTPBasicAuth(self.login, self.api_key)
 
         api_url = (self.api_url or self.DEFAULT_API_URL).rstrip("/")
         endpoint = f"{api_url}/iqdb_queries.json"

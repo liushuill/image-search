@@ -38,10 +38,13 @@ class CredentialRow(QtWidgets.QFrame):
     changed = QtCore.Signal()
 
     def __init__(self, name: str, title: str = "", desc: str = "",
-                 required: bool = False, mask: bool = True, parent=None):
+                 required: bool = False, mask: bool = True,
+                 group: str = "", parent=None):
         super().__init__(parent)
         self.setObjectName("Card")
         self.name = name
+        # 归属的引擎（凭据页按它分组显示）
+        self.group = group
         # mask=False 的值（如用户名）明文显示 —— 打码后没法核对有没有打错
         self.mask = mask
         # 名称与说明来自引擎 schema；链接是界面专属信息
@@ -250,10 +253,22 @@ class CredentialsPage(QtWidgets.QWidget):
                 w.setParent(None)
                 w.deleteLater()
         self.rows = {}
+        last_group = None
         for spec in specs:
+            # 按引擎分组：每个引擎一个小标题，字段排在下面。
+            # 引擎一多，扁平列表就看不出哪条属于哪个引擎。
+            group = spec.group or "其他凭据"
+            if group != last_group:
+                header = QtWidgets.QLabel(group)
+                header.setObjectName("SectionTitle")
+                header.setContentsMargins(2, 10, 0, 2)
+                self.rows_layout.addWidget(header)
+                last_group = group
+
             row = CredentialRow(spec.env_name, title=spec.title,
                                 desc=spec.description,
-                                required=spec.required, mask=spec.mask)
+                                required=spec.required, mask=spec.mask,
+                                group=spec.group)
             row.changed.connect(self._update_save_state)
             self.rows[spec.env_name] = row
             self.rows_layout.addWidget(row)
