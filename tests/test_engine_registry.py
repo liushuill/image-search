@@ -28,8 +28,8 @@ class TestBuiltinDiscovery:
         names = registered_names()
         # danbooru 已改由配置预设提供（见 adapters/presets.py），
         # 不再是注册表里的类 —— 其余四个仍是
-        # sauceNAO / iqdb / danbooru / traceMoe 已改成配置预设，不再是注册类
-        for expected in ("ascii2d", "genericJson", "genericHtml"):
+        # 所有站点专属引擎都已改成配置预设；注册表里只剩两个通用适配器
+        for expected in ("genericJson", "genericHtml"):
             assert expected in names, expected
         # danbooru / traceMoe 已由配置预设提供，不再是注册表里的类
         for moved in ("danbooru", "traceMoe"):
@@ -50,25 +50,23 @@ class TestBuiltinDiscovery:
     def test_ordered_names_follow_declared_order(self):
         """默认顺序取自各引擎的 DEFAULT_ORDER，而不是模块字母序"""
         order = ordered_builtin_names()
-        assert order.index("ascii2d") < order.index("genericJson")
-        assert order.index("ascii2d") < order.index("genericJson")
-        # 适配器排在最后
-        assert order.index("ascii2d") < order.index("genericHtml")
+        assert order.index("genericJson") < order.index("genericHtml")
 
 
 class TestNameNormalization:
-    @pytest.mark.parametrize("name", ["ascii2d", "Ascii2D", "ASCII2D", "ascii2d"])
+    @pytest.mark.parametrize("name", ["genericJson", "GenericJson",
+                                      "GENERICJSON", "genericjson"])
     def test_is_builtin_is_case_insensitive(self, name):
         assert is_builtin(name) is True
 
-    @pytest.mark.parametrize("name", ["ascii2d", "Ascii2D", "ASCII2D"])
+    @pytest.mark.parametrize("name", ["genericJson", "GenericJson", "GENERICJSON"])
     def test_find_builtin_is_case_insensitive(self, name):
-        assert find_builtin(name).NAME == "ascii2d"
+        assert find_builtin(name).NAME == "genericJson"
 
     def test_canonical_name_normalizes_builtin(self):
-        """配置里写 "Ascii2D" 应归一为注册名 "ascii2d" """
-        assert canonical_name("Ascii2D") == "ascii2d"
-        assert canonical_name("ASCII2D") == "ascii2d"
+        """配置里写 "GenericJson" 应归一为注册名 "genericJson" """
+        assert canonical_name("GenericJson") == "genericJson"
+        assert canonical_name("GENERICJSON") == "genericJson"
 
     def test_canonical_name_normalizes_preset(self):
         """配置预设也参与归一化：老配置里写 "SauceNAO" 仍应认得出"""
@@ -85,12 +83,12 @@ class TestNameNormalization:
 
 class TestResolve:
     def test_resolve_builtin(self):
-        ec = EngineConfig(name="ASCII2D")
-        assert resolve_engine_class(ec).NAME == "ascii2d"
+        ec = EngineConfig(name="GENERICJSON")
+        assert resolve_engine_class(ec).NAME == "genericJson"
 
     def test_resolve_builtin_case_insensitive(self):
-        ec = EngineConfig(name="ASCII2D")
-        assert resolve_engine_class(ec).NAME == "ascii2d"
+        ec = EngineConfig(name="GENERICJSON")
+        assert resolve_engine_class(ec).NAME == "genericJson"
 
     def test_resolve_preset_engine(self):
         """配置预设靠 module_path/class_name 解析，与名称无关"""
@@ -172,10 +170,15 @@ class TestDynamicCacheKeying:
 
 class TestSchemaLookup:
     def test_schema_for_class(self):
-        cls = find_builtin("ascii2d")
+        cls = find_builtin("genericJson")
         schema = schema_for_class(cls)
-        assert "long_limit" not in schema       # 通用 schema 不含限流
-        assert "bypass_cfw" in schema           # ascii2d 自己的字段
+        # 适配器自带运行时字段（限流、反爬、字段映射…）
+        for key in ("long_limit", "cloudflare_bypass", "results_path",
+                    "field_artist"):
+            assert key in schema, key
+        # 而通用 schema 本身不含这些站点专属字段
+        from imgsearch.engines.schema import COMMON_SCHEMA
+        assert "results_path" not in COMMON_SCHEMA
 
     def test_schema_for_class_none_falls_back_to_common(self):
         from imgsearch.engines.schema import COMMON_SCHEMA
@@ -184,13 +187,13 @@ class TestSchemaLookup:
     def test_each_engine_declares_only_what_it_uses(self):
         """schema 驱动：引擎不该带上自己用不到的字段"""
         assert "long_limit" not in schema_for_class(find_builtin("ascii2d"))
-        assert "bypass_cfw" in schema_for_class(find_builtin("ascii2d"))
+        assert "results_path" in schema_for_class(find_builtin("genericJson"))
         # danbooru 现在是适配器配置：它的 schema 来自配置而不是类
         from imgsearch.engines.store import EngineStore
         danbooru_schema = EngineStore().get("danbooru").schema()
         assert "login" in {f.key for f in danbooru_schema}
         assert "tag_string" not in {f.key for f in danbooru_schema}
-        assert "bypass_cfw" in schema_for_class(find_builtin("ascii2d"))
+        assert "results_path" in schema_for_class(find_builtin("genericJson"))
         # traceMoe 现在是适配器配置，它的 schema 来自配置
         from imgsearch.engines.store import EngineStore
         assert "cut_borders" not in {f.key for f in EngineStore().get("traceMoe").schema()}

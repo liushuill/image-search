@@ -25,6 +25,7 @@ from imgsearch.engines.adapters.declarative import (
     SCALES,
     DeclarativeEngine,
     mapping_schema,
+    linking_schema,
     runtime_schema,
 )
 from imgsearch.engines.base import SearchResult
@@ -83,6 +84,7 @@ class GenericHtml(DeclarativeEngine):
         ),
         mapping_schema("html"),
         runtime_schema("html"),
+        linking_schema("html"),
     )
 
     def _parse(self, raw: str) -> List[SearchResult]:
@@ -131,11 +133,18 @@ class GenericHtml(DeclarativeEngine):
             return []
 
         results: List[SearchResult] = []
+        seen: set = set()
         for index, node in enumerate(rows):
             get_text = lambda spec, _n=node: dom.extract(_n, spec)        # noqa: E731
             get_links = lambda spec, _n=node: dom.extract_links(_n, spec)  # noqa: E731
             record = self._make_result(get_text, get_links, index)
-            if record is not None:
-                results.append(record)
+            if record is None:
+                continue
+            key = self._dedupe_key(get_text, get_links)
+            if key:
+                if key in seen:
+                    continue
+                seen.add(key)
+            results.append(record)
         results.sort(key=lambda r: r.similarity, reverse=True)
         return results

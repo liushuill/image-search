@@ -112,17 +112,19 @@ class TestMigration:
         """
         内置引擎里不属于其 schema 的旧键会被清掉。
 
-        回归：旧配置给 ascii2d 存了 long_limit=100/long_window=0，
-        而 ascii2d 根本没有限流逻辑 —— 留着只会困惑界面并误伤校验。
+        ascii2d 现在是 HTML 适配器，`bypass_cfw` 已被 `cloudflare_bypass`
+        取代 —— 旧键必须清掉，否则界面会显示一个改了也没用的开关。
         """
         write_config({"search_engines": [{
             "name": "ascii2d", "enabled": True, "priority": 1,
-            "long_limit": 100, "long_window": 0, "short_limit": 4, "short_window": 0,
+            "bypass_cfw": True,          # 旧键（Python 引擎时代）
+            "some_unknown_key": 42,      # 完全不认识的键
         }]})
         s = EngineStore()
         ec = s.get("ascii2d")
-        assert "long_limit" not in ec.settings
-        assert "bypass_cfw" in ec.settings
+        assert "some_unknown_key" not in ec.settings
+        assert "bypass_cfw" not in ec.settings, "旧键应被清掉"
+        assert "cloudflare_bypass" in ec.settings, "适配器的等价字段应存在"
 
     def test_custom_engine_unknown_keys_are_kept(self, write_config):
         """自定义引擎的扩展字段不能被清理"""

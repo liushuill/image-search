@@ -215,9 +215,54 @@ IQDB = Preset(
 )
 
 
+# ──────────────────────────────────────────────
+#  Ascii2D：原本 imgsearch/engines/ascii2d.py（433 行）
+#  最难的一个：两步请求（POST 后重定向到结果页）+ Cloudflare
+# ──────────────────────────────────────────────
+ASCII2D = Preset(
+    name="ascii2d",
+    display="Ascii2D",
+    adapter=HTML_ADAPTER,
+    order=30,
+    enabled=False,
+    settings={
+        "api_url": "https://ascii2d.net",
+        # POST 到 /search/color/，服务端 302 到 /search/color/<hash>
+        "endpoint": "/search/color/",
+        "method": "POST",
+        "image_field": "file",
+        "url_field": "url",
+        "url_in": "data",
+        "auth_mode": "none",
+        # ★ 两步：POST 之后必须再 GET 一次重定向后的结果页
+        "follow_redirect": True,
+        "step2_delay": 1.0,
+        "cloudflare_bypass": True,
+        "container_selector": "",
+        # 站点改版过多次，用一个并集覆盖几种结构
+        "row_selector": ".detail-box, .row.mt-2, .card, .result-item",
+        # 它不返回相似度
+        "similarity_scale": "none",
+        "field_urls": "a[href]@href",
+        # 结果页里混着导航链接，只认这几个图站
+        "links_from_hosts": ("pixiv.net,twitter.com,x.com,"
+                             "danbooru.donmai,yande.re,sankaku"),
+        # 从 pixiv 链接里抠作品 ID
+        "field_pixiv_id": r"a[href*='pixiv']@href~regex:artworks/(\d+)",
+        # 选择器并集会把同一条匹配两次，按 pixiv_id 去重
+        "dedupe_by": "field_pixiv_id",
+        "min_similarity": 60,
+        "request_delay": 3.0,
+    },
+    usage_note=("需要有 cloudscraper（`pip install cloudscraper`）绕过 Cloudflare。"
+                "该站经常拦截自动请求，失败时可忽略。"),
+)
+
+
 PRESETS = (
     SAUCENAO,
     IQDB,
+    ASCII2D,
     DANBOORU,
     TRACEMOE,
 )

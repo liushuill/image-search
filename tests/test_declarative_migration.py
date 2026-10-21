@@ -79,7 +79,7 @@ class TestDanbooruMigration:
     """Danbooru 是试点：它逻辑最简单，而且已经停用，迁移失败也不影响日常"""
 
     def _old(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         return Danbooru(login="someone", api_key="k" * 32)._parse_posts(DANBOORU_POSTS)
 
     def _new(self):
@@ -128,7 +128,7 @@ class TestDanbooruMigration:
     def test_request_shape_matches_old(self):
         """请求也必须一致：URL 走表单、凭据走 BasicAuth"""
         from imgsearch.engines.adapters.generic_json import GenericJson
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
 
         captured = {}
 
@@ -241,7 +241,7 @@ TRACEMOE_SETTINGS = dict(
 
 class TestTraceMoeMigration:
     def _old(self):
-        from imgsearch.engines.tracemoe import TraceMoe
+        from tests.legacy.tracemoe import TraceMoe
         return TraceMoe()._parse_results(json.loads(json.dumps(TRACEMOE_PAYLOAD)))
 
     def _new(self):
@@ -333,7 +333,7 @@ SAUCENAO_SETTINGS = dict(
 
 class TestSauceNAOMigration:
     def _old(self):
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
         return SauceNAO(api_key="k" * 32)._parse_results(
             json.loads(json.dumps(SAUCENAO_PAYLOAD)))
 
@@ -435,7 +435,7 @@ IQDB_SETTINGS = dict(
 
 class TestIQDBMigration:
     def _old(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         return Iqdb()._parse_results(IQDB_SAMPLE)
 
     def _new(self):
@@ -479,3 +479,159 @@ class TestIQDBMigration:
         new = self._new()[0].detail
         assert "800x600" in old           # 手写版：图库名 | 尺寸
         assert "800x600" not in new       # 配置版：只有图库名
+
+
+# ──────────────────────────────────────────────
+#  Ascii2D：HTML + 两步请求 + 主机过滤 + 去重
+# ──────────────────────────────────────────────
+
+ASCII2D_SAMPLE = """<html><body>
+<nav><a href="https://ascii2d.net/about">About</a></nav>
+<div class="detail-box">
+  <a href="https://www.pixiv.net/artworks/111">作品A</a>
+  <a href="https://twitter.com/user/status/222">Twitter</a>
+</div>
+<div class="detail-box">
+  <a href="https://www.pixiv.net/artworks/111">重复的作品A</a>
+</div>
+<div class="detail-box">
+  <a href="https://www.pixiv.net/artworks/333">作品B</a>
+</div>
+</body></html>"""
+
+ASCII2D_SETTINGS = dict(
+    api_url="https://ascii2d.net", endpoint="/search/color/", method="POST",
+    image_field="file", url_field="url", url_in="data", auth_mode="none",
+    follow_redirect=True, step2_delay=0.0, cloudflare_bypass=False,
+    container_selector="",
+    row_selector=".detail-box, .row.mt-2, .card, .result-item",
+    similarity_scale="none",
+    field_urls="a[href]@href",
+    links_from_hosts="pixiv.net,twitter.com,x.com,danbooru.donmai,yande.re,sankaku",
+    field_pixiv_id=r"a[href*='pixiv']@href~regex:artworks/(\d+)",
+    dedupe_by="field_pixiv_id",
+    min_similarity=0,
+)
+
+
+def _legacy_ascii2d_results(html):
+    """
+    复刻手写版 `_parse_result_page` 的**解析部分**（不联网）。
+
+    手写版自己做了三件事，这里逐一对齐以便对比：
+    选择器并集 → 逐项解析 → 按 pixiv_id/首链接去重
+    """
+    from bs4 import BeautifulSoup
+    from tests.legacy.ascii2d import Ascii2D
+
+    eng = Ascii2D()
+    soup = BeautifulSoup(html, "html.parser")
+    items = (soup.select(".detail-box")
+             or soup.select(".row.mt-2")
+             or soup.select(".card, .result-item"))
+    out, seen = [], set()
+    for item in items:
+        result = eng._parse_result_item(item, soup)
+        if not result or not result.is_valid():
+            continue
+        key = result.pixiv_id or (result.ext_urls[0] if result.ext_urls else None)
+        if key and key not in seen:
+            seen.add(key)
+            out.append(result)
+    return out
+
+
+class TestAscii2DMigration:
+    def _old(self):
+        return _legacy_ascii2d_results(ASCII2D_SAMPLE)
+
+    def _new(self):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+        engine = _adapter(GenericHtml, ASCII2D_SETTINGS, ASCII2D_SAMPLE)
+        return engine.search("/tmp/x.jpg")
+
+    def test_dedupe_matches(self):
+        """手写版按 pixiv_id 去重；配置版用 dedupe_by 表达同一件事"""
+        assert len(self._old()) == len(self._new()) == 2
+
+    def test_pixiv_ids_match(self):
+        assert ([r.pixiv_id for r in self._old()]
+                == [r.pixiv_id for r in self._new()] == ["111", "333"])
+
+    def test_navigation_links_are_filtered(self):
+        """结果页里混着导航链接，手写版靠主机名白名单过滤"""
+        for r in self._new():
+            assert all("ascii2d.net" not in u for u in r.ext_urls)
+
+    def test_external_hosts_are_kept(self):
+        first = self._new()[0]
+        assert "https://www.pixiv.net/artworks/111" in first.ext_urls
+        assert "https://twitter.com/user/status/222" in first.ext_urls
+
+    def test_similarity_is_zero(self):
+        """Ascii2D 不返回相似度 —— 量纲填 none"""
+        assert all(r.similarity == 0.0 for r in self._new())
+
+
+class TestAscii2DTwoStepRequest:
+    """两步请求：POST 之后必须 GET 重定向后的结果页"""
+
+    def test_follows_redirect_then_parses(self, tmp_path):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+
+        calls = []
+
+        class Resp:
+            def __init__(self, url, text): self.url, self.text = url, text
+            def raise_for_status(self): pass
+
+        class Spy:
+            auth = None
+            headers = {}
+            def post(self, url, **kw):
+                calls.append(("POST", url))
+                return Resp("https://ascii2d.net/search/color/abc",
+                            "<html>处理中，还没有结果</html>")
+            def get(self, url, **kw):
+                calls.append(("GET", url))
+                return Resp(url, ASCII2D_SAMPLE)
+            def close(self): pass
+
+        image = tmp_path / "x.jpg"
+        image.write_bytes(b"\xff\xd8 fake")
+
+        engine = GenericHtml(**ASCII2D_SETTINGS)
+        engine._session = lambda: Spy()          # type: ignore[assignment]
+        got = engine.search(str(image))
+
+        assert calls[0] == ("POST", "https://ascii2d.net/search/color/")
+        assert calls[1] == ("GET", "https://ascii2d.net/search/color/abc")
+        assert len(got) == 2, "应当解析第二步拿到的页面"
+
+    def test_no_second_request_when_disabled(self, tmp_path):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+
+        calls = []
+
+        class Resp:
+            url = "https://ascii2d.net/search/color/abc"
+            text = ASCII2D_SAMPLE
+            def raise_for_status(self): pass
+
+        class Spy:
+            auth = None
+            headers = {}
+            def post(self, url, **kw):
+                calls.append("POST")
+                return Resp()
+            def get(self, url, **kw):
+                calls.append("GET")
+                return Resp()
+            def close(self): pass
+
+        image = tmp_path / "x.jpg"
+        image.write_bytes(b"\xff\xd8 fake")
+        engine = GenericHtml(**dict(ASCII2D_SETTINGS, follow_redirect=False))
+        engine._session = lambda: Spy()          # type: ignore[assignment]
+        engine.search(str(image))
+        assert calls == ["POST"], "关掉 follow_redirect 就不该再 GET"

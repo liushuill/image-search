@@ -218,8 +218,8 @@ class TestDeclaredSecrets:
     def test_required_matches_runtime_enforcement(self):
         """界面标注的必填必须与代码真正强制的集合一致"""
         import pytest as _pytest
-        from imgsearch.engines.danbooru import Danbooru
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.danbooru import Danbooru
+        from tests.legacy.saucenao import SauceNAO
         from imgsearch.service import declared_secrets
 
         required = {c.env_name for c in declared_secrets() if c.required}

@@ -412,26 +412,26 @@ class TestThrottling:
 
     def test_saucenao_declares_interval(self):
         """SauceNAO 的 4 次/30 秒 应换算成 7.5 秒"""
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
         engine = SauceNAO(api_key="dummy-for-test",
                           short_limit=4, short_window=30)
         assert engine.request_interval() == pytest.approx(7.5)
 
     def test_saucenao_interval_follows_config(self):
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
         engine = SauceNAO(api_key="dummy-for-test",
                           short_limit=10, short_window=60)
         assert engine.request_interval() == pytest.approx(6.0)
 
     def test_saucenao_interval_zero_when_unlimited(self):
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
         engine = SauceNAO(api_key="dummy-for-test",
                           short_limit=0, short_window=30)
         assert engine.request_interval() == 0.0
 
     def test_engines_without_limit_declare_zero(self):
         """没有限额的引擎应声明 0（不节流）"""
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert Iqdb().request_interval() == 0.0
 
 

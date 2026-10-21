@@ -6,7 +6,7 @@ Ascii2D 解析相关测试
 
 from bs4 import BeautifulSoup
 
-from imgsearch.engines.ascii2d import Ascii2D
+from tests.legacy.ascii2d import Ascii2D
 
 
 # ── 测试用 HTML 片段 ─────────────────────────────────────

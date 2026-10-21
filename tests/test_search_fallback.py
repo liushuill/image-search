@@ -259,7 +259,7 @@ class TestEnginesDoNotReadProxyThemselves:
 
     def test_iqdb_ignores_config_proxy_when_given_none(self, monkeypatch):
         import imgsearch.config as cfg
-        import imgsearch.engines.iqdb as mod
+        import tests.legacy.iqdb as mod
         cfg.load_config()["proxy"] = "http://127.0.0.1:7897"
 
         seen = self._freeze(monkeypatch, mod)
@@ -269,7 +269,7 @@ class TestEnginesDoNotReadProxyThemselves:
         assert seen.get("proxies") is None, "引擎把配置里的代理又捡回来了"
 
     def test_iqdb_uses_explicit_proxy(self, monkeypatch):
-        import imgsearch.engines.iqdb as mod
+        import tests.legacy.iqdb as mod
         seen = self._freeze(monkeypatch, mod)
         eng = mod.Iqdb(proxies={"https": "http://127.0.0.1:7897"})
         with pytest.raises(RuntimeError):
@@ -278,7 +278,7 @@ class TestEnginesDoNotReadProxyThemselves:
 
     def test_saucenao_ignores_config_proxy_when_given_none(self, monkeypatch):
         import imgsearch.config as cfg
-        import imgsearch.engines.saucenao as mod
+        import tests.legacy.saucenao as mod
         cfg.load_config()["proxy"] = "http://127.0.0.1:7897"
 
         seen = self._freeze(monkeypatch, mod)

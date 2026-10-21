@@ -4,7 +4,7 @@ SauceNAO 模块测试
 测试搜索结果的解析逻辑，使用 mock 数据模拟 API 响应。
 """
 
-from imgsearch.engines.saucenao import SauceNAO
+from tests.legacy.saucenao import SauceNAO
 
 
 # ── Mock API 响应数据 ────────────────────────────────────

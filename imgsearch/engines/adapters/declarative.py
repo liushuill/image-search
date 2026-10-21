@@ -12,6 +12,7 @@
 
 import re
 from typing import List, Optional, Tuple
+from urllib.parse import urlparse
 
 from imgsearch.engines.base import SearchEngine, SearchResult
 from imgsearch.engines.schema import Field, Schema, STR
@@ -190,6 +191,20 @@ def mapping_schema(kind: str) -> Schema:
     return Schema(
         *[Field(key, label, STR, example, help=help_text, advanced=True)
           for key, label, example, _ in MAPPED_FIELDS]
+    )
+
+
+def linking_schema(kind: str) -> Schema:
+    """结果链接的收窄规则（两个适配器共用）"""
+    return Schema(
+        Field("links_from_hosts", "只收这些主机的链接", STR, "",
+              help="逗号分隔，如 `pixiv.net,twitter.com`。"
+                   "结果页里常混着导航链接，用这个筛掉。留空 = 全收",
+              advanced=True),
+        Field("dedupe_by", "按此字段去重", STR, "",
+              help="填一个映射字段名（如 `field_pixiv_id`）或 `field_urls`。"
+                   "选择器并集可能把同一条结果匹配两次，用它去掉重复",
+              advanced=True),
     )
 
 
@@ -490,6 +505,45 @@ class DeclarativeEngine(SearchEngine):
         base, transforms = split_transform(spec)
         return apply_transforms(get_text(base), transforms)
 
+    def _filter_hosts(self, links: List[str]) -> List[str]:
+        """
+        只保留指定主机上的链接。
+
+        结果页里往往混着导航/广告链接；用手写版时是代码里写死
+        「只认 pixiv/twitter/danbooru」，这里改成配置。
+        """
+        raw = str(self.opt("links_from_hosts", "") or "").strip()
+        if not raw:
+            return links
+        allowed = [h.strip().lower() for h in raw.split(",") if h.strip()]
+        if not allowed:
+            return links
+        kept = []
+        for url in links:
+            try:
+                netloc = urlparse(url).netloc.lower()
+            except Exception:                             # noqa: BLE001
+                netloc = ""
+            if any(host in netloc for host in allowed):
+                kept.append(url)
+        return kept
+
+    def _dedupe_key(self, get_text, get_links) -> str:
+        """
+        去重用的键（配置 `dedupe_by` 指定取哪个映射字段）。
+
+        选择器并集（`.a, .b`）可能把同一个结果匹配两次，
+        手写版靠 pixiv_id 或首个链接去重，这里把它配置化。
+        """
+        spec = str(self.opt("dedupe_by", "") or "").strip()
+        if not spec:
+            return ""
+        if spec == "field_urls":
+            links = get_links(split_transform(
+                str(self.opt("field_urls", "") or ""))[0])
+            return links[0] if links else ""
+        return self._field_text(get_text, spec)
+
     def _make_result(self, get_text, get_links, index: int = 0) -> Optional[SearchResult]:
         """
         从一条记录里组装 SearchResult。
@@ -510,6 +564,7 @@ class DeclarativeEngine(SearchEngine):
         base = (self.api_url or self.DEFAULT_API_URL or "").strip()
         links = [_absolute_url(u, base) for u in get_links(
             split_transform(str(self.opt("field_urls", "") or ""))[0]) if u]
+        links = self._filter_hosts(links)
         pixiv_id = self._field_text(get_text, "field_pixiv_id")
         # 有些站点只给 URL，不给 pixiv_id —— 交给 SearchResult 的归一化去补
         result = SearchResult(

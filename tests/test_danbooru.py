@@ -24,21 +24,21 @@ class TestUserAgentEtiquette:
     """
 
     def test_user_agent_identifies_the_account(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         eng = Danbooru(login="some_user", api_key="x" * 32)
         ua = eng.user_agent()
         assert "some_user" in ua
         assert "Mozilla" not in ua, "不能伪装成浏览器"
 
     def test_user_agent_is_not_a_browser_default(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         eng = Danbooru(login="someone", api_key="x" * 32)
         assert "Chrome" not in eng.user_agent()
         assert "Safari" not in eng.user_agent()
 
     def test_session_uses_that_user_agent(self):
         """make_session 必须把它真的挂上去，否则只是写了个没人用的方法"""
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         eng = Danbooru(login="someone", api_key="x" * 32)
         session = eng.make_session()
         try:
@@ -49,7 +49,7 @@ class TestUserAgentEtiquette:
 
     def test_other_engines_keep_the_global_default(self):
         """只给 Danbooru 换 UA —— 其他引擎可能依赖浏览器 UA 过 Cloudflare"""
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert Iqdb().user_agent() == ""
 
 
@@ -60,7 +60,7 @@ class TestCustomHeadersAndParams:
     """
 
     def test_custom_headers_reach_the_session(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         eng = Iqdb(headers={"X-My-Header": "hello"})
         session = eng.make_session()
         try:
@@ -70,7 +70,7 @@ class TestCustomHeadersAndParams:
 
     def test_custom_headers_override_user_agent(self):
         """用户可以自己指定 UA（例如按文档写进数字 user id）"""
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         eng = Iqdb(headers={"User-Agent": "my-bot/1.0 (user #12345)"})
         session = eng.make_session()
         try:
@@ -79,12 +79,12 @@ class TestCustomHeadersAndParams:
             session.close()
 
     def test_no_headers_is_fine(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         session = Iqdb().make_session()
         session.close()
 
     def test_merge_params_adds_custom_keys(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         eng = Iqdb(params={"extra": "1"})
         assert eng.merge_params({"limit": 20}) == {"extra": "1", "limit": 20}
 
@@ -93,20 +93,20 @@ class TestCustomHeadersAndParams:
         引擎自身的参数优先：用户手滑覆盖了 url/limit 会静默搜错东西，
         比"自定义项没生效"更难排查。
         """
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         eng = Iqdb(params={"limit": "999", "extra": "1"})
         merged = eng.merge_params({"limit": 20})
         assert merged["limit"] == 20
         assert merged["extra"] == "1"
 
     def test_merge_params_without_custom(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert Iqdb().merge_params({"a": 1}) == {"a": 1}
 
     def test_danbooru_applies_custom_params(self):
         """Danbooru 的 payload 也要过一遍 merge_params"""
         import inspect
-        from imgsearch.engines import danbooru
+        from tests.legacy import danbooru
         src = inspect.getsource(danbooru.Danbooru._call_api)
         assert "merge_params" in src
 
@@ -115,7 +115,7 @@ class TestAuthErrorMessages:
     """401/403 是最可能撞上的两个错误，提示必须能直接指导下一步"""
 
     def _engine(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         return Danbooru(login="some_user", api_key="x" * 32)
 
     def _fake_error(self, status):
@@ -186,7 +186,7 @@ class TestPermissionVersusAuthErrors:
     """
 
     def _engine(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         return Danbooru(login="some_user", api_key="x" * 32)
 
     def test_privilege_error_means_restricted_key(self, monkeypatch):
@@ -238,11 +238,11 @@ class TestUsageNote:
 
     def test_danbooru_is_disabled_by_default(self):
         """新装环境不该默认启用它：门槛比别的引擎高"""
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         assert Danbooru.ENABLED_BY_DEFAULT is False
 
     def test_declares_a_usage_note(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         note = Danbooru.USAGE_NOTE
         assert note
         assert "API Key" in note
@@ -255,7 +255,7 @@ class TestUsageNote:
     def test_other_engines_have_no_note(self):
         """没有前提条件的引擎不该显示须知，免得噪声"""
         from imgsearch.engines.base import SearchEngine
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert SearchEngine.USAGE_NOTE == ""
         assert Iqdb.USAGE_NOTE == ""
 
@@ -315,10 +315,16 @@ class TestGuiUsageNote:
         assert "API Key" in page.usage_label.text()
         assert page.usage_label.isHidden() is False
 
-    def test_label_hidden_for_engine_without_note(self, qapp):
+    def test_label_hidden_for_engine_without_note(self, qapp, monkeypatch):
+        """
+        现在每个内置引擎都有注意事项，所以这条改用「自造一个没有 note 的引擎」来测。
+        """
         from imgsearch_gui.pages.engines_page import EnginesPage
+        monkeypatch.setattr(
+            "imgsearch.engines.store.EngineConfig.usage_note",
+            property(lambda self: ""))
         page = EnginesPage()
-        self._select(page, "ascii2d")
+        self._select(page, "iqdb")
         assert page.usage_label.text() == ""
         assert page.usage_label.isHidden() is True
 

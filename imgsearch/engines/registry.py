@@ -34,12 +34,9 @@ _SKIP_MODULES = {
     "base", "schema", "registry", "store", "presets",
     "config", "__init__", "__main__",
     # 实验分支 experiment/declarative-only：
-    # 下面这些已改由 adapters/presets.py 的配置预设提供，
-    # 模块保留仅作对照/回滚，不再自动注册成内置引擎。
-    "danbooru",
-    "tracemoe",
-    "saucenao",
-    "iqdb",
+    # 站点专属引擎已全部改成配置预设（adapters/presets.py），
+    # 它们的旧实现移到了 tests/legacy/，engines/ 目录里只剩
+    # 基类、schema、注册表与两个通用适配器。
 }
 
 _builtins_loaded = False

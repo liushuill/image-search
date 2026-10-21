@@ -24,6 +24,7 @@ from imgsearch.engines.adapters.declarative import (
     SCALES,
     DeclarativeEngine,
     mapping_schema,
+    linking_schema,
     runtime_schema,
 )
 from imgsearch.engines.adapters.paths import dig_any, dig_links, dig_list
@@ -84,6 +85,7 @@ class GenericJson(DeclarativeEngine):
         ),
         mapping_schema("json"),
         runtime_schema("json"),
+        linking_schema("json"),
     )
 
     def _parse(self, raw: str) -> List[SearchResult]:
@@ -106,10 +108,17 @@ class GenericJson(DeclarativeEngine):
         get_links = lambda spec: dig_links(row, spec)    # noqa: E731
 
         results: List[SearchResult] = []
+        seen: set = set()
         for index, row in enumerate(rows):
             record = self._make_result(get_text, get_links, index)
-            if record is not None:
-                results.append(record)
+            if record is None:
+                continue
+            key = self._dedupe_key(get_text, get_links)
+            if key:
+                if key in seen:
+                    continue
+                seen.add(key)
+            results.append(record)
         results.sort(key=lambda r: r.similarity, reverse=True)
         return results
 

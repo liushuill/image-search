@@ -66,13 +66,13 @@ class TestUseApiKeyField:
         assert "use_api_key" in keys
 
     def test_defaults_to_true(self):
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert Iqdb().opt_bool("use_api_key", True) is True
 
     def test_auth_label_is_human_readable(self):
-        from imgsearch.engines.danbooru import Danbooru
-        from imgsearch.engines.iqdb import Iqdb
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.danbooru import Danbooru
+        from tests.legacy.iqdb import Iqdb
+        from tests.legacy.saucenao import SauceNAO
 
         assert SauceNAO(api_key="k").auth_label == "必须凭据"
         assert Danbooru(login="u", api_key="k").auth_label == "可选凭据"
@@ -82,7 +82,7 @@ class TestUseApiKeyField:
 class TestAuthModeBehaviour:
     def test_none_mode_never_uses_key(self):
         """AUTH_MODE=none 的引擎恒为 False —— 它本来就没有凭据可发"""
-        from imgsearch.engines.iqdb import Iqdb
+        from tests.legacy.iqdb import Iqdb
         assert Iqdb().uses_api_key is False
 
     def test_required_engine_refuses_when_key_disabled(self):
@@ -90,7 +90,7 @@ class TestAuthModeBehaviour:
         必须凭据的引擎关掉开关后要**立刻明确报错**，
         而不是构造成功然后在请求时给个莫名的 HTTP 错误。
         """
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
 
         with pytest.raises(ValueError) as ei:
             SauceNAO(api_key="k", use_api_key=False)
@@ -99,7 +99,7 @@ class TestAuthModeBehaviour:
         assert "使用 API Key" in msg            # 告诉用户去哪个开关打开
 
     def test_required_engine_still_requires_key_when_enabled(self):
-        from imgsearch.engines.saucenao import SauceNAO
+        from tests.legacy.saucenao import SauceNAO
         with pytest.raises(ValueError, match="未配置"):
             SauceNAO(api_key="", use_api_key=True)
 
@@ -108,7 +108,7 @@ class TestAuthModeBehaviour:
         AUTH_MODE=optional（Danbooru）：关掉开关后**能构造**，
         并且不带凭据 —— 此时只能搜公网 URL（上传需认证）。
         """
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
 
         eng = Danbooru(login="someone", api_key="k" * 32, use_api_key=False)
         assert eng.uses_api_key is False
@@ -124,7 +124,7 @@ class TestAuthModeBehaviour:
         ⚠️ BasicAuth 是在 `_call_api` 里挂的（每请求一次），不在 make_session 里 ——
         所以要在请求构造这一层测，测 make_session 测不到。
         """
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
 
         eng = Danbooru(login="someone", api_key="k" * 32, use_api_key=True)
         assert eng.uses_api_key is True
@@ -139,7 +139,7 @@ class TestAuthModeBehaviour:
         assert spy.auth.password == "k" * 32
 
     def test_optional_engine_omits_auth_when_disabled(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
 
         eng = Danbooru(login="someone", api_key="k" * 32, use_api_key=False)
         spy = _SpySession()
@@ -149,7 +149,7 @@ class TestAuthModeBehaviour:
         assert spy.auth is None, "匿名模式不该挂 BasicAuth"
 
     def test_optional_engine_still_needs_credentials_when_enabled(self):
-        from imgsearch.engines.danbooru import Danbooru
+        from tests.legacy.danbooru import Danbooru
         with pytest.raises(ValueError, match="用户名未配置"):
             Danbooru(login="", api_key="k" * 32, use_api_key=True)
 
