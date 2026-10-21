@@ -38,7 +38,6 @@ _SKIP_MODULES = {
     # 模块保留仅作对照/回滚，不再自动注册成内置引擎。
     "danbooru",
     "tracemoe",
-    "saucenao",
 }
 
 _builtins_loaded = False
