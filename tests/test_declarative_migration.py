@@ -281,3 +281,108 @@ class TestTraceMoeMigration:
     def test_multilingual_title_fallback(self):
         """chinese 为空时回退到 native"""
         assert self._new()[0].material == "日本語タイトル"
+
+
+# ──────────────────────────────────────────────
+#  SauceNAO：JSON + 查询参数鉴权 + 限流
+# ──────────────────────────────────────────────
+
+SAUCENAO_PAYLOAD = {
+    "header": {"account": {"long_remaining": 98, "short_remaining": 3}},
+    "results": [
+        {
+            "header": {"similarity": "95.2",
+                       "thumbnail": "https://img3.saucenao.com/t1.jpg"},
+            "data": {"pixiv_id": 111, "pixiv_page": 1, "member_name": "画师A",
+                     "member_id": 999, "title": "标题A", "material": "",
+                     "ext_urls": ["https://www.pixiv.net/artworks/111"],
+                     "source": "https://www.pixiv.net/artworks/111"},
+        },
+        {
+            "header": {"similarity": "61.0",
+                       "thumbnail": "https://img3.saucenao.com/t2.jpg"},
+            "data": {"creator": "画师B", "material": "作品B",
+                     "ext_urls": ["https://danbooru.donmai.us/posts/1"],
+                     "danbooru_id": 1},
+        },
+        {
+            "header": {"similarity": "20.0"},
+            "data": {},                                   # 无有用信息 → 丢弃
+        },
+    ],
+}
+
+SAUCENAO_SETTINGS = dict(
+    api_url="https://saucenao.com/search.php", endpoint="", method="POST",
+    image_field="file", url_field="url", url_in="params", auth_mode="query",
+    results_path="results", similarity_scale="0-100",
+    field_similarity="header.similarity",
+    field_pixiv_id="data.pixiv_id", field_pixiv_page="data.pixiv_page",
+    field_artist="data.member_name|data.creator",
+    field_artist_id="data.member_id",
+    field_title="data.title|data.material", field_material="data.material",
+    field_urls="data.ext_urls", field_highres="data.source",
+    field_thumbnail="header.thumbnail",
+    field_danbooru_id="data.danbooru_id",
+    field_gelbooru_id="data.gelbooru_id",
+    field_twitter_id="data.twitter_user_id",
+    long_limit=100, long_window=86400, short_limit=4, short_window=30,
+    min_similarity=0,
+)
+
+
+class TestSauceNAOMigration:
+    def _old(self):
+        from imgsearch.engines.saucenao import SauceNAO
+        return SauceNAO(api_key="k" * 32)._parse_results(
+            json.loads(json.dumps(SAUCENAO_PAYLOAD)))
+
+    def _new(self):
+        from imgsearch.engines.adapters.generic_json import GenericJson
+        engine = _adapter(GenericJson, SAUCENAO_SETTINGS,
+                          json.dumps(SAUCENAO_PAYLOAD))
+        return engine.search("/tmp/x.jpg")
+
+    def test_same_count(self):
+        # 手写版不过滤空结果，配置版会丢掉「一点有用信息都没有」的那条
+        assert len(self._old()) == 3
+        assert len(self._new()) == 2
+
+    @pytest.mark.parametrize("field", [
+        "similarity", "pixiv_id", "pixiv_page", "artist", "artist_id",
+        "title", "material", "ext_urls", "thumbnail", "danbooru_id",
+    ])
+    def test_field_matches(self, field):
+        old, new = self._old(), self._new()
+        for i, (a, b) in enumerate(zip(old, new)):
+            before, after = getattr(a, field), getattr(b, field)
+            # 手写版同样的 str(None) 问题
+            if field == "pixiv_id" and before == "None":
+                before = None
+            assert before == after, f"第 {i} 条 {field}: {before!r} != {after!r}"
+
+    def test_artist_falls_back_to_creator(self):
+        """member_name 空时用 creator —— 第 2 条走的就是这条回退"""
+        assert self._new()[1].artist == "画师B"
+
+    def test_title_falls_back_to_material(self):
+        assert self._new()[1].title == "作品B"
+
+    def test_page_is_int(self):
+        assert self._new()[0].pixiv_page == 1
+        assert self._new()[1].pixiv_page == 0
+
+    def test_rate_limit_interval(self):
+        """4 次/30 秒 → 每张 7.5 秒，批量搜索才不会被 429"""
+        from imgsearch.engines.adapters.generic_json import GenericJson
+        engine = GenericJson(**SAUCENAO_SETTINGS)
+        assert engine.request_interval() == pytest.approx(7.5)
+
+    def test_highres_falls_back_to_source_only(self):
+        """
+        已知差异：手写版还会从 ext_urls 里挑 i.pximg.net 链接，
+        那是「在数组里按子串筛选」，路径表达不了。
+        这里只用 data.source（SauceNAO 通常会给）。
+        """
+        new = self._new()[0]
+        assert new.highres_url == "https://www.pixiv.net/artworks/111"

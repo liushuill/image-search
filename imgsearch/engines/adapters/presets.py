@@ -129,7 +129,56 @@ TRACEMOE = Preset(
 )
 
 
+# ──────────────────────────────────────────────
+#  SauceNAO：原本 imgsearch/engines/saucenao.py（323 行）
+# ──────────────────────────────────────────────
+SAUCENAO = Preset(
+    name="sauceNAO",
+    display="SauceNAO（Pixiv 覆盖最好）",
+    adapter=JSON_ADAPTER,
+    order=10,
+    enabled=True,
+    settings={
+        "api_url": "https://saucenao.com/search.php",
+        "endpoint": "",
+        "method": "POST",
+        "image_field": "file",
+        "url_field": "url",
+        "url_in": "params",
+        "auth_mode": "query",          # api_key 走查询参数
+        "results_path": "results",
+        "similarity_scale": "0-100",
+        "field_similarity": "header.similarity",
+        "field_pixiv_id": "data.pixiv_id",
+        "field_pixiv_page": "data.pixiv_page",
+        "field_artist": "data.member_name|data.creator",
+        "field_artist_id": "data.member_id",
+        "field_title": "data.title|data.material",
+        "field_material": "data.material",
+        "field_urls": "data.ext_urls",
+        # ⚠️ 手写版还有一层回退：从 ext_urls 里挑 i.pximg.net 链接。
+        # 那是「在数组里按子串筛选」，路径表达不了，这里只用 data.source。
+        "field_highres": "data.source",
+        "field_thumbnail": "header.thumbnail",
+        "field_danbooru_id": "data.danbooru_id",
+        "field_gelbooru_id": "data.gelbooru_id",
+        "field_twitter_id": "data.twitter_user_id",
+        # 服务端限制：4 次/30 秒、100 次/天
+        "long_limit": 100,
+        "long_window": 86400,
+        "short_limit": 4,
+        "short_window": 30,
+        "min_similarity": 60,
+        "request_delay": 8.0,
+        "params": {"output_type": 2, "db": 999, "numres": 5},
+    },
+    env={"api_key": "SAUCENAO_KEY"},
+    usage_note="需要 SauceNAO API Key（免费申请）。每日 100 次、30 秒内 4 次。",
+)
+
+
 PRESETS = (
+    SAUCENAO,
     DANBOORU,
     TRACEMOE,
 )

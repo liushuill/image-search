@@ -36,6 +36,8 @@ MAPPED_FIELDS = (
     ("field_danbooru_id", "Danbooru ID", "id", ""),
     ("field_gelbooru_id", "Gelbooru ID", "", ""),
     ("field_twitter_id", "Twitter ID", "", ""),
+    ("field_artist_id", "画师 ID", "member_id", ""),
+    ("field_pixiv_page", "Pixiv 页码", "pixiv_page", ""),
 )
 
 
@@ -144,6 +146,13 @@ def _requests_error():
     """requests 的异常基类（延迟导入，避免模块导入期依赖）"""
     import requests
     return requests.RequestException
+
+
+def _as_int(raw: str, default: int = 0) -> int:
+    try:
+        return int(float(str(raw).strip()))
+    except (TypeError, ValueError):
+        return default
 
 
 def _absolute_url(url: str) -> str:
@@ -505,6 +514,9 @@ class DeclarativeEngine(SearchEngine):
             danbooru_id=self._field_text(get_text, "field_danbooru_id") or None,
             gelbooru_id=self._field_text(get_text, "field_gelbooru_id") or None,
             twitter_id=self._field_text(get_text, "field_twitter_id") or None,
+            artist_id=self._field_text(get_text, "field_artist_id") or None,
+            # 页码是整数；取不到就当 0（与手写引擎一致）
+            pixiv_page=_as_int(self._field_text(get_text, "field_pixiv_page")),
         )
         # 一条结果都没有任何有用信息时丢弃，避免污染结果表
         if not (result.artist or result.title or result.ext_urls
