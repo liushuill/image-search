@@ -57,6 +57,16 @@ class GenericJson(DeclarativeEngine):
                   help="本地文件上传时用的表单字段名"),
             Field("url_field", "URL 字段名", STR, "url",
                   help="「通过 URL 搜索」时用的参数名"),
+            Field("url_in", "URL 放在", STR, "params",
+                  choices=("params", "data"),
+                  help="params = 查询参数（?url=…）；data = 表单字段",
+                  advanced=True),
+            Field("api_key", "API Key", "secret", "",
+                  help="「鉴权方式」为 query/basic 时使用。"
+                       "存在 .env 里（权限 0600），不进 config.json"),
+            Field("login", "用户名", "secret", "", mask=False,
+                  help="仅 basic 鉴权需要；query 鉴权下作为可选参数",
+                  advanced=True),
             Field("auth_mode", "鉴权方式", STR, "none",
                   choices=("none", "query", "basic"),
                   help="none = 不需要；query = 把 api_key/login 加进查询参数；"

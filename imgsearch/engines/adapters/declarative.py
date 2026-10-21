@@ -33,6 +33,9 @@ MAPPED_FIELDS = (
     ("field_highres", "高清直链", "", ""),
     ("field_thumbnail", "缩略图", "header.thumbnail", "td.image img@src"),
     ("field_detail", "备注", "", ""),
+    ("field_danbooru_id", "Danbooru ID", "id", ""),
+    ("field_gelbooru_id", "Gelbooru ID", "", ""),
+    ("field_twitter_id", "Twitter ID", "", ""),
 )
 
 
@@ -56,6 +59,21 @@ def apply_transforms(value: str, transforms: List[str]) -> str:
             text = text[len(arg):]
         elif name == "strip_suffix" and arg and text.endswith(arg):
             text = text[: -len(arg)]
+        elif name == "tags_title":
+            # "blonde_hair blue_eyes artist:xxx copyright:yyy" →
+            # 去掉带前缀的标签、下划线换成空格、取前 N 个
+            try:
+                count = int(arg) if arg else 5
+            except ValueError:
+                count = 5
+            words = []
+            for token in text.split():
+                if ":" in token:            # artist:/copyright:/character: 等
+                    continue
+                words.append(token.replace("_", " "))
+                if len(words) >= count:
+                    break
+            text = ", ".join(words)
         elif name == "regex":
             try:
                 found = re.search(arg, text)
@@ -77,6 +95,12 @@ def split_transform(spec: str):
         return "", []
     parts = spec.split("~")
     return parts[0].strip(), [p for p in parts[1:]]
+
+
+def _requests_error():
+    """requests 的异常基类（延迟导入，避免模块导入期依赖）"""
+    import requests
+    return requests.RequestException
 
 
 def _absolute_url(url: str) -> str:
@@ -231,7 +255,9 @@ class DeclarativeEngine(SearchEngine):
         if mode == "none":
             return {}, None
 
-        api_key = str(self.opt("api_key", "") or "").strip()
+        # ⚠️ api_key 是 SearchEngine 的命名参数，不在 self.options 里 ——
+        # 用 self.opt("api_key") 取会永远是空串
+        api_key = str(getattr(self, "api_key", "") or "").strip()
         login = str(self.opt("login", "") or "").strip()
         if mode == "basic":
             return {}, (login, api_key) if login and api_key else None
@@ -314,7 +340,11 @@ class DeclarativeEngine(SearchEngine):
             files = {field: ("image", content)}
             data = dict(self.opt("form_params", {}) or {})
         else:
-            payload[self._url_field()] = image_url
+            # 站点不同：有的要 ?url=（查询参数），有的要表单字段
+            if str(self.opt("url_in", "params") or "params") == "data":
+                data = {self._url_field(): image_url}
+            else:
+                payload[self._url_field()] = image_url
 
         session = self._session()
         if basic is not None:
@@ -345,7 +375,7 @@ class DeclarativeEngine(SearchEngine):
             if quota is not None:
                 quota.record()
             return resp.text
-        except Exception as e:                            # noqa: BLE001
+        except _requests_error() as e:
             status = getattr(getattr(e, "response", None), "status_code", None)
             if status in (401, 403):
                 raise ConnectionError(
@@ -400,10 +430,15 @@ class DeclarativeEngine(SearchEngine):
             thumbnail=_absolute_url(
                 self._field_text(get_text, "field_thumbnail")) or None,
             detail=self._field_text(get_text, "field_detail") or None,
+            danbooru_id=self._field_text(get_text, "field_danbooru_id") or None,
+            gelbooru_id=self._field_text(get_text, "field_gelbooru_id") or None,
+            twitter_id=self._field_text(get_text, "field_twitter_id") or None,
         )
         # 一条结果都没有任何有用信息时丢弃，避免污染结果表
         if not (result.artist or result.title or result.ext_urls
-                or result.thumbnail or result.highres_url):
+                or result.thumbnail or result.highres_url
+                or result.pixiv_id or result.danbooru_id
+                or result.gelbooru_id or result.twitter_id):
             return None
         return result
 

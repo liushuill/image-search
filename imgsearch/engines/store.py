@@ -118,8 +118,14 @@ class EngineConfig:
             if f.key in _MANAGED_KEYS:
                 continue
             value = self.settings.get(f.key, f.default)
-            if (value is None or value == "") and f.env_var:
-                value = secrets.get(f.env_var, "") or ""
+            if value is None or value == "":
+                # SECRET 字段没写 env_var 时按**实例名**派生 ——
+                # 这样同一个适配器类挂多个实例（booruA/booruB）时
+                # 各用各的凭据，不会共用一个 Key。
+                env_name = f.env_var or (
+                    env_var_for(self.name, f) if f.is_secret else "")
+                if env_name:
+                    value = secrets.get(env_name, "") or ""
             kwargs[f.key] = value
         kwargs["proxies"] = proxies
         return kwargs
@@ -425,6 +431,7 @@ class EngineStore:
             deduped.append(e)
         # 升级新增的内置引擎自动补进来
         deduped = self._append_missing_builtins(deduped)
+        deduped = self._apply_presets(deduped)
         self._renumber(deduped)
         return deduped
 
@@ -444,6 +451,56 @@ class EngineStore:
             ec = EngineConfig(name=name, enabled=enabled, priority=len(engines) + 1)
             self._apply_schema_defaults(ec)
             engines.append(ec)
+
+        engines.extend(self._preset_configs())
+        return engines
+
+    def _preset_configs(self) -> List[EngineConfig]:
+        """
+        把「配置预设」变成引擎条目（实验分支：消灭 Python 引擎类）。
+
+        预设走 module_path/class_name 指向通用适配器，
+        所以 Store 里看不到任何站点专属的 Python 代码。
+        """
+        from imgsearch.engines.adapters.presets import PRESETS
+
+        out: List[EngineConfig] = []
+        for preset in PRESETS:
+            ec = EngineConfig(
+                name=preset.name, enabled=preset.enabled, priority=0,
+                module_path=preset.module_path, class_name=preset.class_name,
+            )
+            self._apply_schema_defaults(ec)
+            ec.settings.update(preset.settings)
+            ec._preset_order = preset.order        # 排序用，不落盘
+            out.append(ec)
+        return out
+
+    def _apply_presets(self, engines: List[EngineConfig]) -> List[EngineConfig]:
+        """
+        把「配置预设」应用到已有条目（幂等，每次加载都跑）。
+
+        实验分支 experiment/declarative-only：
+        danbooru 这类引擎从 Python 类改成了适配器配置，老配置里
+        module_path/class_name 是空的，解析不到类 —— 这里补上，
+        并补全预设新引入的字段（**不覆盖用户已设的值**）。
+
+        用户主动删掉的预设不会被重建（尊重意图）；
+        `engines reset` 会通过 _defaults() 重新装回来。
+        """
+        from imgsearch.engines.adapters.presets import PRESETS
+
+        for preset in PRESETS:
+            ec = next((e for e in engines
+                       if e.name.strip().lower() == preset.name.lower()), None)
+            if ec is None:
+                continue
+            if not (ec.module_path and ec.class_name):
+                ec.module_path = preset.module_path
+                ec.class_name = preset.class_name
+            for key, value in preset.settings.items():
+                if key not in ec.settings or ec.settings[key] in ("", None):
+                    ec.settings[key] = value
         return engines
 
     def _append_missing_builtins(self, engines: List[EngineConfig]) -> List[EngineConfig]:
