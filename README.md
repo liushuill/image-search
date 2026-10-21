@@ -456,15 +456,46 @@ SauceNAO 命中 Danbooru/Gelbooru 索引时，`data` 里**没有 `pixiv_id` 字�
 ./run.sh engines reset                   # 恢复默认列表
 ```
 
+## 所有引擎都是配置
+
+> **本站点的引擎全部由「配置预设」提供，没有一行站点专属的 Python 代码。**
+> `imgsearch/engines/` 里只剩基类、schema、注册表、存储，以及两个**通用适配器**。
+> 旧的 Python 实现移到 `tests/legacy/`，仅用于「新旧双跑对比」测试。
+
 内置引擎（权重小的先用）：
 
-| 引擎 | 类型 | 默认 | 说明 |
+| 引擎 | 承载 | 默认 | 说明 |
 |---|---|---|---|
-| `sauceNAO` | 官方 API | ✅ 启用 | Pixiv 覆盖最好，需要 API Key |
-| `iqdb` | HTML 解析 | ✅ 启用 | IQDB 聚合：Danbooru / Konachan / yande.re / Gelbooru / Sankaku / e-shuushuu / Zerochan / Anime-Pictures。无需凭据 |
-| `ascii2d` | HTML 解析 | ⏸ 禁用 | **已确认不可用**：上传端点被 Cloudflare WAF 挡（403，cloudscraper 无效），备用图床 catbox.moe 拒收（412）。仅保留实现供日后站点恢复 |
-| `traceMoe` | 官方 API | ⏸ 禁用 | 动画截图溯源（回答"第几集第几秒"）。**对插画会高分误报**，需要时用 `-e traceMoe` |
-| `danbooru` | 官方 API | ⏸ 禁用 | 需要账号（用户名 + API Key）|
+| `sauceNAO` | JSON 适配器 | ✅ 启用 | Pixiv 覆盖最好，需要 API Key。限流 100/天 + 4/30 秒 |
+| `iqdb` | HTML 适配器 | ✅ 启用 | 聚合 Danbooru / Konachan / yande.re / Gelbooru / Sankaku / e-shuushuu / Zerochan / Anime-Pictures。无需凭据 |
+| `ascii2d` | HTML 适配器 | ⏸ 禁用 | 两步请求（POST→重定向→GET）+ Cloudflare 绕过。**站点目前仍拦截自动请求**，失败可忽略 |
+| `traceMoe` | JSON 适配器 | ⏸ 禁用 | 动画截图溯源（回答"第几集第几秒"）。**对插画会高分误报**，需要时用 `-e traceMoe` |
+| `danbooru` | JSON 适配器 | ⏸ 禁用 | 需要账号（用户名 + API Key）。它不返回相似度，`similarity_scale=rank` 按排名估算 |
+
+两个适配器（`genericJson` / `genericHtml`）本身就是「模板」：
+新站点 = 往配置里填一张映射表，见下面的「声明式适配器」。
+
+### 迁移时补的能力（都能用于新站点）
+
+| 能力 | 配置项 | 原先是谁的需求 |
+|---|---|---|
+| 限流 | `long_limit/long_window/short_limit/short_window` | SauceNAO、TraceMoe |
+| Cloudflare 绕过 | `cloudflare_bypass` | Ascii2D |
+| 两步请求 | `follow_redirect` + `step2_delay` | Ascii2D |
+| 按排名估算相似度 | `similarity_scale=rank` + `rank_scores` | Danbooru |
+| 字段变换 | `path~strip_prefix:X` / `~regex:PATTERN` / `~tags_title:N` | 多个 |
+| 模板字段 | `template:第 {episode} 集 @ {from:time}` | TraceMoe |
+| 数组筛选 | `edges[?isMain=true]` | TraceMoe |
+| 链接白名单 | `links_from_hosts` | Ascii2D（结果页混着导航链接） |
+| 去重 | `dedupe_by` | Ascii2D（选择器并集匹配两次） |
+
+### 迁移中确认的两处损失（如实记录）
+
+- **IQDB** 的 `detail` 从「图库名 | 尺寸」变成只有图库名 ——
+  尺寸在相邻单元格，而 soupsieve 在这个表格结构上
+  `nth-child` / 兄弟选择器都取不到
+- **SauceNAO** 的高清直链少了「从 `ext_urls` 里挑 `i.pximg.net`」那层回退 ——
+  那是「在数组里按子串筛选」，现有路径语法只支持按字段值筛选（`[?k=v]`）
 
 ### auto 模式：按权重降级 + 阈值判定
 
@@ -540,7 +571,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（754 项）
+├── tests/                     ← pytest（833 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -775,7 +806,7 @@ class MyEngine(SearchEngine):
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **754 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **833 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -789,7 +820,7 @@ class MyEngine(SearchEngine):
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **754 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **833 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象
