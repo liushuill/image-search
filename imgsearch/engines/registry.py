@@ -256,6 +256,13 @@ def invalidate_engine_cache() -> None:
     也会真正重新导入，而不是继续用旧的类对象。
     """
     for module_path, _cls_name in list(_DYNAMIC_CACHE.keys()):
+        # ⚠️ 随包发布的模块不参与热重载。
+        # 用户通过向导创建的引擎会用 module_path 指向
+        # `imgsearch.engines.adapters.generic_json` —— 那是**代码库自己的**
+        # 模块，把它从 sys.modules 踢掉会得到第二个模块副本和第二个类对象，
+        # 于是 isinstance / 类属性比较全部失效。
+        if module_path.startswith("imgsearch."):
+            continue
         sys.modules.pop(module_path, None)
     _DYNAMIC_CACHE.clear()
 

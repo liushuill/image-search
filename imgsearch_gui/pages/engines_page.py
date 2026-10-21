@@ -45,7 +45,8 @@ class EnginesPage(QtWidgets.QWidget):
         head.addWidget(title)
         head.addStretch(1)
 
-        for text, slot in (("添加自定义引擎", self._add_engine),
+        for text, slot in (("新建引擎…", self._new_engine_dialog),
+                           ("添加已有引擎", self._add_engine),
                            ("生成模板", self._scaffold),
                            ("恢复默认", self._reset)):
             btn = QtWidgets.QPushButton(text)
@@ -433,6 +434,20 @@ class EnginesPage(QtWidgets.QWidget):
         self._current = ""
         self.changed.emit()
         self.refresh()
+
+    def _new_engine_dialog(self) -> None:
+        """
+        新建引擎向导：选 JSON/HTML + 填映射表 → 不写代码接一个新站点。
+
+        「测试这个引擎」会显示原始响应 —— 没有它，用户判断不了
+        是映射写错还是站点没返回。
+        """
+        from imgsearch_gui.dialogs.new_engine_dialog import NewEngineDialog
+
+        dlg = NewEngineDialog(self)
+        if dlg.exec() == QtWidgets.QDialog.Accepted and dlg.created_name:
+            self.changed.emit()
+            self.refresh(keep=dlg.created_name)
 
     def _add_engine(self) -> None:
         name, ok = QtWidgets.QInputDialog.getText(self, "添加引擎", "引擎名称（配置名）：")
