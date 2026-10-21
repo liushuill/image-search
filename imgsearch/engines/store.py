@@ -566,6 +566,19 @@ class EngineStore:
         """
         from imgsearch.engines.adapters.presets import PRESETS
 
+        preset_names = {p.name.lower() for p in PRESETS}
+
+        # 预设被移除后，旧配置里可能还留着指向上适配器的 module_path ——
+        # 那会让运行时继续用适配器，而预设已经不提供默认值了。
+        # 若这个引擎名仍是注册的内置类，就解绑，回到类实现。
+        for e in engines:
+            if e.name.strip().lower() in preset_names:
+                continue
+            if (e.module_path or "").startswith("imgsearch.engines.adapters."):
+                if _registry_is_builtin(e.name):
+                    e.module_path = ""
+                    e.class_name = ""
+
         for preset in PRESETS:
             ec = next((e for e in engines
                        if e.name.strip().lower() == preset.name.lower()), None)
