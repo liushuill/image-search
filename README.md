@@ -540,7 +540,7 @@ image-search/
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
 ├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（718 项）
+├── tests/                     ← pytest（754 项）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -568,6 +568,82 @@ image-search/
 
 依赖是否齐备靠「能不能 import 哨兵包」判断（`requests` / `PySide6`），
 而不是靠标记文件 —— 标记文件会跟实际状态不一致。
+
+### 声明式适配器：不写代码接新站点
+
+内置两个通用适配器，**填一张映射表**就能接一个新站点：
+
+| 适配器 | 适用 | 配置方式 |
+|---|---|---|
+| **JSON 适配器** `genericJson` | 站点返回 JSON | 点号路径：`data.creator`、`results[0].x` |
+| **HTML 适配器** `genericHtml` | 站点返回 HTML 页面 | CSS 选择器：`td.image a@href`、`:self` |
+
+两者共用同一套请求/鉴权/量纲逻辑，站点差异全部写在配置里。
+
+> 一个类可以挂**多个实例**：接 A 站和 B 站只要加两条引擎配置，
+> 不需要写两个文件。
+
+```bash
+# 加一个 JSON 站点
+imgsearch engines add booruA --module imgsearch.engines.adapters.generic_json \
+    --class GenericJson
+imgsearch engines config booruA --set api_url=https://booru.example
+imgsearch engines config booruA --set results_path=posts
+imgsearch engines config booruA --set field_artist=tag_string_artist
+```
+
+#### 映射表的写法
+
+| 配置项 | JSON 适配器 | HTML 适配器 |
+|---|---|---|
+| 结果在哪 | `results_path`（如 `results`；留空=顶层数组） | `container_selector` + `row_selector` |
+| 相似度 | `field_similarity` = 路径 | `field_similarity` = 选择器 |
+| 量纲 | `similarity_scale`：`0-100` / `0-1` / `percent-text` / `none` |
+| 各字段 | `field_artist` / `field_title` / `field_urls` / `field_thumbnail` … |
+| 回退链 | 用 `\|` 串起来取第一个非空的：`anilist.title.chinese\|anilist.title.romaji` |
+| 行过滤 | — | `row_must_contain`：只保留文本含该词的行（排除「你的图片」这类块） |
+| 协议相对地址 | `//host/x` 会自动补成 `https://host/x` |
+
+#### 两个真实站点的验证（开发时做过，不是纸上设计）
+
+**HTML 适配器重现 IQDB**（纯配置，零代码）：
+
+```
+container_selector  #pages
+row_selector        table
+row_must_contain    similarity
+similarity_scale    percent-text
+field_similarity    :self                     ← 整行文本里取 "42% similarity"
+field_urls          td.image a@href
+field_thumbnail     td.image img@src
+```
+
+结果与手写引擎一致：`42 / 41 / 40`，条数相同、链接相同（协议相对地址已补全）。
+
+**JSON 适配器重现 TraceMoe**：
+
+```
+results_path       result
+similarity_scale   0-1                        ← TraceMoe 是 0–1 小数
+field_similarity   similarity
+field_title        anilist.title.chinese|anilist.title.native|anilist.title.romaji
+field_urls         anilist.siteUrl|video
+params             {"anilistInfo": "", "cutBorders": ""}   ← 手写版也传这两个
+```
+
+结果条数相同、AniList 链接相同；差异只有「标题被格式化成了第几集」——
+那属于**需要计算的字段**，声明式表达不了。
+
+#### 覆盖不到的情况（请写一个普通引擎文件）
+
+- **多步流程**：如 Ascii2D 的 `POST → 拿重定向 URL → GET 解析`
+- **Cloudflare 反爬**：需要 cloudscraper
+- **需要计算/拼接的字段**：如由 ID 推导原图地址、把时间秒数格式化成 `第 5 集 @ 15:48`
+
+⚠️ HTML 适配器**最脆**：站点改版会让选择器静默失效。
+所以它在「一个元素都找不到」时会报错并给出诊断（页面标题、整页 table 数），
+而「有元素但全被过滤掉」视为**正常无匹配**、返回空列表——
+这两件事必须分开，否则正常的"没搜到"会被误报成配置错误。
 
 ### 引擎的统一模板
 
@@ -699,7 +775,7 @@ class MyEngine(SearchEngine):
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **718 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **754 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -713,7 +789,7 @@ class MyEngine(SearchEngine):
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **718 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **754 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象

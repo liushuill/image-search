@@ -21,7 +21,9 @@ class TestDefaults:
             assert expected in names, expected
 
     def test_default_order_matches_declared_order(self, store):
-        assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe", "danbooru"]
+        # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
+        assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
+                                 "danbooru", "genericJson", "genericHtml"]
 
     def test_engines_that_need_credentials_are_off_by_default(self, store):
         assert store.get("sauceNAO").enabled is True
@@ -33,7 +35,10 @@ class TestDefaults:
         assert store.get("traceMoe").enabled is False
 
     def test_priorities_are_sequential(self, store):
-        assert [e.priority for e in store.list_all()] == [1, 2, 3, 4, 5]
+        # 权重从 1 连续排下来；引擎增减时这里跟着变是正常的，
+        # 重点是不能有空洞或重复
+        priorities = [e.priority for e in store.list_all()]
+        assert priorities == list(range(1, len(priorities) + 1))
 
     def test_settings_filled_from_schema(self, store):
         ec = store.get("sauceNAO")
@@ -207,7 +212,9 @@ class TestCrud:
         store.add("mine")
         store.remove("mine")
         store.reset()
-        assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe", "danbooru"]
+        # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
+        assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
+                                 "danbooru", "genericJson", "genericHtml"]
 
     def test_persistence_round_trip(self, store):
         store.add("mine")
