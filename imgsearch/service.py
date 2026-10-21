@@ -52,21 +52,10 @@ class CredentialSpec:
     group: str = ""
 
 
-from imgsearch.engines.schema import env_var_for  # noqa: E402
-
-
 def _env_name_for(ec, f) -> str:
-    """一个 secret 字段实际落在哪个环境变量上（三处调用必须一致）"""
-    if f.env_var:
-        return f.env_var
-    try:
-        from imgsearch.engines.adapters.presets import by_name
-        preset = by_name(ec.name)
-        if preset is not None and preset.env.get(f.key):
-            return preset.env[f.key]
-    except Exception:                                     # noqa: BLE001
-        pass
-    return env_var_for(ec.name, f)
+    """一个 secret 字段实际落在哪个环境变量上（与 store 用同一实现）"""
+    from imgsearch.engines.store import env_name_for_config
+    return env_name_for_config(ec, f)
 
 
 def declared_secrets() -> List[CredentialSpec]:

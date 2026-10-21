@@ -51,10 +51,19 @@ class QuotaState:
     def exhausted(self) -> bool:
         return not self.unlimited and self.remaining <= 0
 
-    def summary(self) -> str:
+    def summary(self, display_name: str = "") -> str:
+        """
+        一行状态。
+
+        Args:
+            display_name: 覆盖显示名。**界面应当传入引擎的显示名** ——
+                内部 label 是配置里的标识（``sauceNAO``），
+                而用户想看的是「SauceNAO（Pixiv 覆盖最好）」。
+        """
+        label = display_name or self.label or self.name
         if self.unlimited:
-            return f"{self.label or self.name}：无限制"
-        text = f"{self.label or self.name}：{self.used}/{self.limit}"
+            return f"{label}：无限制"
+        text = f"{label}：{self.used}/{self.limit}"
         if self.reset_in:
             hours = self.reset_in / 3600
             text += f"（约 {hours:.1f} 小时后释放）" if hours >= 1 else f"（{self.reset_in} 秒后释放）"

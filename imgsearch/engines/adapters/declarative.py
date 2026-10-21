@@ -349,8 +349,10 @@ class DeclarativeEngine(SearchEngine):
             limit = int(self.opt_int("long_limit", 0) or 0)
             window = int(self.opt_int("long_window", 0) or 0)
             if limit > 0 and window > 0:
-                self._quota = SlidingWindowQuota(self.NAME, limit=limit,
-                                                 window=window)
+                # 用**配置里的名字**：同一个适配器类挂多个实例时，
+                # 各实例要各有一份额度计数，界面也要显示各自的名字
+                self._quota = SlidingWindowQuota(
+                    self.engine_name or self.NAME, limit=limit, window=window)
             else:
                 self._quota = None
         return self._quota

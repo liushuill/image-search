@@ -141,11 +141,7 @@ class EngineConfig:
                 # SECRET 字段没写 env_var 时按**实例名**派生 ——
                 # 这样同一个适配器类挂多个实例（booruA/booruB）时
                 # 各用各的凭据，不会共用一个 Key。
-                from imgsearch.engines.adapters.presets import by_name
-                preset = by_name(self.name)
-                env_name = (f.env_var
-                            or (preset.env.get(f.key) if preset else "")
-                            or (env_var_for(self.name, f) if f.is_secret else ""))
+                env_name = env_name_for_config(self, f) if f.is_secret else ""
                 if env_name:
                     value = secrets.get(env_name, "") or ""
             kwargs[f.key] = value
@@ -199,6 +195,26 @@ class EngineConfig:
 # ──────────────────────────────────────────────
 #  存储
 # ──────────────────────────────────────────────
+
+
+def env_name_for_config(ec: "EngineConfig", f) -> str:
+    """
+    一个 secret 字段**实际**落在哪个环境变量上。
+
+    ⚠️ 写（update）与读（to_engine_kwargs）必须都调它 ——
+    曾经写用派生名、读用预设名，于是「配了 key 却仍说未配置」。
+    优先级：字段声明 > 配置预设指定 > 按实例名派生
+    """
+    if getattr(f, "env_var", ""):
+        return f.env_var
+    try:
+        from imgsearch.engines.adapters.presets import by_name
+        preset = by_name(getattr(ec, "name", ""))
+        if preset is not None and preset.env.get(f.key):
+            return preset.env[f.key]
+    except Exception:                                     # noqa: BLE001
+        pass
+    return env_var_for(ec.name, f)
 
 
 def _is_unset(value) -> bool:
@@ -343,7 +359,20 @@ class EngineStore:
                 if not (e.module_path and e.class_name):
                     e.module_path = preset.module_path
                     e.class_name = preset.class_name
-                e.settings.update(preset.settings)
+                # ⚠️ 只刷新**已知被旧默认值污染**的键，不能整份覆盖 ——
+                # 否则用户合法设置的 api_url / timeout 会被预设冲掉。
+                # 目前只有相似度阈值属于这种情况（适配器通用默认 60，
+                # 而这些引擎校准过的值分别是 85 / 65）。
+                for key in ("min_similarity",):
+                    if key not in preset.settings:
+                        continue
+                    # ⚠️ 只在「存的就是适配器通用默认值」时才刷新 ——
+                    # 那说明这个值从没被用户改过（或是旧默认值残留）。
+                    # 用户若自己调过（例如 sauceNAO 设成 90），必须保留。
+                    field = e.schema().get(key)
+                    old_default = getattr(field, "default", None)
+                    if e.settings.get(key) in (old_default, None):
+                        e.settings[key] = preset.settings[key]
 
     def _reconcile_secret_env_names(self) -> None:
         """
@@ -358,7 +387,7 @@ class EngineStore:
             for f in ec.schema():
                 if not f.is_secret:
                     continue
-                correct = env_var_for(ec.name, f)
+                correct = env_name_for_config(ec, f)
                 legacy = legacy_env_var_for(ec.name, f)
                 if legacy == correct:
                     continue
@@ -406,7 +435,7 @@ class EngineStore:
                 if not raw or not isinstance(raw, str):
                     continue
                 value = raw.strip()
-                env_name = env_var_for(ec.name, f)
+                env_name = env_name_for_config(ec, f)
                 previous = secrets.get(env_name)
                 secrets.set(env_name, value)
                 ec.settings[f.key] = ""
@@ -834,7 +863,7 @@ class EngineStore:
                 # 读取时由 to_engine_kwargs() 从 .env 回退。
                 text = str(raw or "").strip()
                 if text:
-                    secrets.set(env_var_for(ec.name, f), text)
+                    secrets.set(env_name_for_config(ec, f), text)
                 pending[key] = ""
                 continue
 
@@ -905,7 +934,7 @@ class EngineStore:
                 f"     继承 SearchEngine 并实现 search() 的类"
             )
 
-        return cls(**ec.to_engine_kwargs(proxies=proxies))
+        return cls(**ec.to_engine_kwargs(proxies=proxies), engine_name=ec.name)
 
 
 # ──────────────────────────────────────────────

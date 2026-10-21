@@ -44,6 +44,51 @@ class Preset:
 
 
 # ──────────────────────────────────────────────
+#  SauceNAO：原本 imgsearch/engines/saucenao.py（323 行）
+# ──────────────────────────────────────────────
+SAUCENAO = Preset(
+    name="sauceNAO",
+    display="SauceNAO（Pixiv 覆盖最好）",
+    adapter=JSON_ADAPTER,
+    order=10,
+    enabled=True,
+    settings={
+        "api_url": "https://saucenao.com/search.php",
+        "endpoint": "",
+        "method": "POST",
+        "image_field": "file",
+        "url_field": "url",
+        "url_in": "params",
+        "auth_mode": "query",
+        "results_path": "results",
+        "similarity_scale": "0-100",
+        "field_similarity": "header.similarity",
+        "field_pixiv_id": "data.pixiv_id",
+        "field_pixiv_page": "data.pixiv_page",
+        "field_artist": "data.member_name|data.creator",
+        "field_artist_id": "data.member_id",
+        "field_title": "data.title|data.material",
+        "field_material": "data.material",
+        "field_urls": "data.ext_urls",
+        "field_highres": "data.source",
+        "field_thumbnail": "header.thumbnail",
+        "field_danbooru_id": "data.danbooru_id",
+        "field_gelbooru_id": "data.gelbooru_id",
+        "field_twitter_id": "data.twitter_user_id",
+        "long_limit": 100,
+        "long_window": 86400,
+        "short_limit": 4,
+        "short_window": 30,
+        "min_similarity": 60,
+        "request_delay": 8.0,
+        "params": {"output_type": 2, "db": 999, "numres": 5},
+    },
+    env={"api_key": "SAUCENAO_KEY"},
+    usage_note="需要 SauceNAO API Key（免费申请）。每日 100 次、30 秒内 4 次。",
+)
+
+
+# ──────────────────────────────────────────────
 #  Danbooru：原本 imgsearch/engines/danbooru.py（325 行）
 #  现在只是「JSON 适配器 + 一张映射表」
 # ──────────────────────────────────────────────
@@ -129,14 +174,8 @@ TRACEMOE = Preset(
 )
 
 
-# ⚠️ SauceNAO 暂未放进预设列表。
-# 它是主力引擎，而迁移它还差两件事：
-#   1. 真 bug：`update_settings` 写凭据时没走预设的 env 映射，
-#      写到 IMGSEARCH_SAUCENAO_API_KEY，而读取用的是 SAUCENAO_KEY
-#   2. 约 20 项测试假设它有 db / numres / _long_limit（现在这些是 params）
-# 对比测试（tests/test_declarative_migration.py::TestSauceNAOMigration）
-# 已经证明映射本身能对上手写版，等上面两条补完再接管。
 PRESETS = (
+    SAUCENAO,
     DANBOORU,
     TRACEMOE,
 )

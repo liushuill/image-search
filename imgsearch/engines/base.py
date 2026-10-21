@@ -172,6 +172,9 @@ class SearchEngine:
         self.request_delay = (
             float(request_delay) if request_delay not in (None, "") else 8.0
         )
+        # 配置里的名字（不是类的 NAME）—— 同一个适配器类挂多个实例时，
+        # 配额文件、错误提示都该用它，否则界面会显示成「genericJson」
+        self.engine_name = str(options.pop("engine_name", "") or "")
         # 引擎特有字段（由 CONFIG_SCHEMA 声明，如 long_limit / login）
         self.options: Dict[str, Any] = dict(options)
 

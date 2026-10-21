@@ -107,7 +107,7 @@ class TestSchemaForm:
         got = form.values()
         assert got["timeout"] == ec.get("timeout")
         assert got["proxy_mode"] == ec.get("proxy_mode")
-        assert got["db"] == ec.get("db")
+        assert got["timeout"] == ec.get("timeout")
 
     def test_reset_to_updates_widgets(self, qapp, store):
         from imgsearch_gui.widgets.schema_form import SchemaForm

@@ -189,7 +189,11 @@ class SchemaForm(QtWidgets.QWidget):
             h.setContentsMargins(0, 0, 0, 0)
             h.setSpacing(8)
 
-            env_name = env_var_for(self.engine_name, f)
+            # 与 store/service 用同一套解析（预设可能指定了固定变量名）
+            from imgsearch.engines.store import get_store, env_name_for_config
+            _ec = get_store().get(self.engine_name)
+            env_name = (env_name_for_config(_ec, f) if _ec is not None
+                        else env_var_for(self.engine_name, f))
             status = QtWidgets.QLabel()
             status.setObjectName("FieldHelp")
             if secrets.is_set(env_name):

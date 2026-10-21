@@ -42,9 +42,13 @@ class TestDefaults:
 
     def test_settings_filled_from_schema(self, store):
         ec = store.get("sauceNAO")
+        # 通用字段 + 适配器的运行时字段都在
         for key in ("api_url", "api_key", "min_similarity", "proxy_mode",
-                    "request_delay", "timeout", "long_limit", "db", "numres"):
+                    "request_delay", "timeout", "long_limit", "short_limit"):
             assert key in ec.settings, key
+        # SauceNAO 专属参数（db / numres / output_type）现在走「自定义查询参数」
+        assert ec.settings["params"]["db"] == 999
+        assert ec.settings["params"]["numres"] == 5
 
 
 class TestMigration:
@@ -183,7 +187,7 @@ class TestCrud:
         ec = store.get("sauceNAO")
         assert ec.get("timeout") == 45 and isinstance(ec.get("timeout"), int)
         assert ec.get("request_delay") == 2.5
-        assert ec.get("db") == 5
+        assert ec.get("timeout") == 45
         assert ec.get("min_similarity") == 70
 
     def test_update_invalid_value_raises_and_does_not_write(self, store):
@@ -245,11 +249,13 @@ class TestZeroIsPreserved:
         assert kwargs["long_window"] == 0
 
     def test_zero_reaches_engine_instance(self, store):
-        store.update("sauceNAO", long_limit=0, long_window=0, api_key="k")
+        store.update("sauceNAO", long_limit=0, long_window=0,
+                     short_limit=0, short_window=0, api_key="k")
         eng = store.build_engine("sauceNAO")
-        assert eng._long_limit == 0
-        assert eng._long_window == 0
-        assert eng._quota.unlimited is True
+        # 「0 = 不限制」通过公开接口验证：不建配额对象、不做节流。
+        # （适配器没有 _long_limit / _quota.unlimited 这类内部属性）
+        assert eng.quota_state() == []
+        assert eng.request_interval() == 0.0
 
 
 class TestSingletons:

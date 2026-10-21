@@ -247,7 +247,7 @@ def describe_quotas(engine_store=None) -> List[str]:
             notes.append(f"  · {status.display_name}：无限制")
             continue
         for state in status.states:
-            notes.append(f"  · {state.summary()}")
+            notes.append(f"  · {state.summary(status.display_name)}")
     if any(st.usable and st.interval > 0 for st in engine_statuses(engine_store)):
         pace = max(st.interval for st in engine_statuses(engine_store)
                    if st.usable)
