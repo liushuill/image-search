@@ -274,6 +274,16 @@ meta    (key, value)                                   内部元信息
 
 ## 界面预览
 
+![搜索](docs/images/search.png)
+
+![引擎配置](docs/images/engines.png)
+
+**新建引擎向导**（选类型 → 填映射 → 测试 → 创建，不写代码）：
+
+![新建引擎](docs/images/wizard.png)
+
+![清理](docs/images/cleanup.png)
+
 三处「看图」的地方：
 
 | 位置 | 能做什么 |
