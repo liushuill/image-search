@@ -23,8 +23,9 @@ class TestDefaults:
     def test_default_order_matches_declared_order(self, store):
         # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
         # 顺序按 DEFAULT_ORDER / preset.order 混排
+        # 适配器不是引擎，不占条目（它们是「模板」，由向导/预设引用）
         assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
-                                 "danbooru", "genericJson", "genericHtml"]
+                                 "danbooru"]
 
     def test_engines_that_need_credentials_are_off_by_default(self, store):
         assert store.get("sauceNAO").enabled is True
@@ -221,8 +222,9 @@ class TestCrud:
         store.reset()
         # 顺序由 DEFAULT_ORDER 决定；两个声明式适配器排在最后（90/91）
         # 顺序按 DEFAULT_ORDER / preset.order 混排
+        # 适配器不是引擎，不占条目（它们是「模板」，由向导/预设引用）
         assert store.names() == ["sauceNAO", "iqdb", "ascii2d", "traceMoe",
-                                 "danbooru", "genericJson", "genericHtml"]
+                                 "danbooru"]
 
     def test_persistence_round_trip(self, store):
         store.add("mine")

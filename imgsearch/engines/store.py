@@ -217,6 +217,39 @@ def env_name_for_config(ec: "EngineConfig", f) -> str:
     return env_var_for(ec.name, f)
 
 
+def _is_unused_adapter_entry(ec: "EngineConfig") -> bool:
+    """
+    这条配置是不是「没配置过的适配器条目」。
+
+    判据：名字是适配器类名、没绑定模块、且没有任何映射字段被填过。
+    用户如果真拿它配过站点（填了 results_path / row_selector 之类），
+    这里会返回 False，条目保留。
+    """
+    try:
+        from imgsearch.engines.registry import find_builtin
+        cls = find_builtin(ec.name)
+    except Exception:                                     # noqa: BLE001
+        return False
+    if cls is None or not getattr(cls, "IS_ADAPTER", False):
+        return False
+    if ec.module_path:
+        return False
+    keys = ("results_path", "container_selector", "row_selector",
+            "field_similarity", "field_urls", "field_artist")
+    # ⚠️ 要和 schema 的**默认值**比，不能只判空 ——
+    # 适配器的 field_artist 默认就是 "data.creator"，只看非空会永远判成「配置过」
+    try:
+        schema = ec.schema()
+    except Exception:                                     # noqa: BLE001
+        return False
+    for key in keys:
+        field = schema.get(key)
+        default = getattr(field, "default", "") if field is not None else ""
+        if str(ec.settings.get(key, default) or "").strip() != str(default or "").strip():
+            return False
+    return True
+
+
 def _is_unset(value) -> bool:
     """
     判断一个配置值是否「没设过」，用于预设补全。
@@ -539,6 +572,8 @@ class EngineStore:
         entries = []
         for name in registry.ordered_builtin_names():
             cls = registry.find_builtin(name)
+            if getattr(cls, "IS_ADAPTER", False):
+                continue          # 适配器不是引擎，不进默认列表
             ec = EngineConfig(
                 name=name, enabled=bool(getattr(cls, "ENABLED_BY_DEFAULT", True)),
                 priority=0)
@@ -595,6 +630,11 @@ class EngineStore:
         """
         from imgsearch.engines.adapters.presets import PRESETS
 
+        # 早期版本把两个适配器也当成引擎条目写进了配置
+        # （genericJson / genericHtml）。它们没有映射就毫无用处，
+        # 这里清掉 —— 但只清「没配置过」的，免得误删用户的成果。
+        engines = [e for e in engines if not _is_unused_adapter_entry(e)]
+
         preset_names = {p.name.lower() for p in PRESETS}
 
         # 预设被移除后，旧配置里可能还留着指向上适配器的 module_path ——
@@ -637,6 +677,8 @@ class EngineStore:
             if name.strip().lower() in existing:
                 continue
             cls = registry.find_builtin(name)
+            if getattr(cls, "IS_ADAPTER", False):
+                continue          # 适配器不是引擎
             ec = EngineConfig(
                 name=name,
                 enabled=bool(getattr(cls, "ENABLED_BY_DEFAULT", True)),

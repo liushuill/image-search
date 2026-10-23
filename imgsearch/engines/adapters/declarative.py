@@ -243,6 +243,10 @@ class DeclarativeEngine(SearchEngine):
 
     AUTH_MODE = "none"
     ENABLED_BY_DEFAULT = False
+    # 适配器是「模板」，不是可用的引擎：
+    # 它没有映射就什么都解析不出来，出现在引擎列表里只会让人困惑。
+    # 引擎列表与默认配置据此跳过它们；向导/预设仍直接指向这些类。
+    IS_ADAPTER = True
     # 子类声明自己的响应类型，仅用于日志与提示
     RESPONSE_KIND = "json"
 

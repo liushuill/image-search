@@ -293,11 +293,26 @@ class TestHtmlAdapter:
 
 
 class TestAdapterRegistration:
-    def test_both_are_registered_as_builtin_engines(self):
+    def test_adapters_are_classes_not_engine_entries(self):
+        """
+        适配器是「模板」，不是可用的引擎 —— 没有映射就什么都解析不出来。
+        所以它们**注册为类**（向导与预设要用），但**不占引擎条目**。
+        """
+        from imgsearch.engines.registry import find_builtin
         from imgsearch.engines.store import get_store
+
+        assert find_builtin("genericJson") is not None
+        assert find_builtin("genericHtml") is not None
+
         names = [ec.name for ec in get_store().list_all()]
-        assert "genericJson" in names
-        assert "genericHtml" in names
+        assert "genericJson" not in names
+        assert "genericHtml" not in names
+
+    def test_adapter_entries_are_flagged(self):
+        from imgsearch.engines.adapters.generic_html import GenericHtml
+        from imgsearch.engines.adapters.generic_json import GenericJson
+        for cls in (GenericJson, GenericHtml):
+            assert getattr(cls, "IS_ADAPTER", False) is True
 
     def test_disabled_by_default(self):
         """适配器要用户自己填映射，默认不该启用"""
