@@ -72,7 +72,7 @@ run.bat engines list
 - venv 布局差异（`Scripts\python.exe`）由 `bootstrap.py` 统一处理
 - `.bat` 纯 ASCII、无 BOM、支持 `py -3`
 - 「解压后自动建环境」这条路径已实测（在 Linux 上跑的全新解压 → venv → 可用）
-- 417 项测试含 GUI 的 offscreen 测试（构造每个页面并走真实数据库路径）
+- GUI 的 offscreen 测试会构造每个页面并走真实数据库路径
 
 **尚未覆盖（需要 Windows 实机才能确认）**
 
@@ -568,13 +568,18 @@ image-search/
 │   ├── config.py              ← 非敏感配置（config.json）+ 敏感键转发
 │   ├── secrets.py             ← 凭据读写（.env / 环境变量，原子写 + 0600）
 │   ├── cli.py                 ← 命令行入口
-│   ├── engines/               ← 搜索引擎
-│   │   ├── schema.py          ←   CONFIG_SCHEMA 协议（字段声明/类型/校验）
+│   ├── engines/               ← 搜索引擎（**没有站点专属代码**）
+│   │   ├── schema.py          ←   字段声明/类型/校验
 │   │   ├── base.py            ←   SearchEngine / SearchResult
-│   │   ├── registry.py        ←   引擎类注册与解析（自动发现内置引擎）
+│   │   ├── registry.py        ←   适配器类注册与解析
 │   │   ├── store.py           ←   EngineStore：配置的唯一数据源
 │   │   ├── quota.py           ←   滑动窗口限流（跨进程有效）
-│   │   └── saucenao / iqdb / ascii2d / tracemoe / danbooru
+│   │   └── adapters/          ←   两类通用适配器 + 内置引擎的预设
+│   │       ├── declarative.py ←     公共骨架（请求/鉴权/量纲/两步/限流）
+│   │       ├── paths.py       ←     JSON 路径（a.b[0].c、回退链 a|b）
+│   │       ├── dom.py         ←     HTML 选择器（css@attr、:self）
+│   │       ├── generic_json.py / generic_html.py  ← 两个适配器类
+│   │       └── presets.py     ←     5 个内置引擎 = 5 张映射表
 │   ├── library/               ← 本地图库（以 dHash 内容为身份）
 │   │   ├── db.py              ←   SQLite schema 与迁移
 │   │   ├── paths.py           ←   根路径登记（拒绝嵌套 / 失效检测 / 重新指定）
@@ -589,13 +594,15 @@ image-search/
 │   ├── links/pixiv.py         ← Pixiv 图片直链模板管理
 │   ├── processor/             ← 图片识别、dHash 感知哈希
 │   └── utils/network.py       ← 请求封装（重试 / 代理 / cloudscraper）
-├── my_engines/                ← 自定义引擎（engines new 生成，可动态加载）
-├── tests/                     ← pytest（846 项）
+├── my_engines/                ← 自定义 Python 引擎（配置表达不了时才用）
+├── tests/                     ← pytest（851 项）
+│   └── legacy/                ←   迁移前的 5 个 Python 引擎，仅作双跑对比
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
 │   ├── workers.py             ←   后台搜索线程（含 stdout 桥接，拿到引擎实时进度）
-│   ├── pages/                 ←   搜索 / 引擎 / 凭据
+│   ├── pages/                 ←   搜索 / 图库 / 浏览 / 清理 / 引擎 / 凭据 / 设置
+│   ├── dialogs/               ←   批量识别 / 导出 / 新建引擎向导
 │   └── widgets/               ←   拖拽区 / Schema 表单 / 结果表
 ├── run.sh / run.bat           ← CLI 启动器（自动建 venv）
 ├── run-gui.sh / run-gui.bat   ← GUI 启动器
@@ -825,7 +832,7 @@ class MyEngine(SearchEngine):
 - ✅ 按路径 / 按类别的占用统计
 - ✅ 清理：搜索结果 / 缩略图 / 单路径全部数据 / 孤立缩略图，
   每次清理后 checkpoint → VACUUM → checkpoint，空间真实回收
-- ✅ 测试 202 → **846 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
+- ✅ 测试 202 → **851 项**（含「移动后仍命中」与「空间真的回收」两条关键回归）
 
 **顺带修掉的一个真 bug**：引擎里写的是
 ``create_session(proxies=self.proxies or get_proxies())`` ——
@@ -839,7 +846,7 @@ class MyEngine(SearchEngine):
 - ✅ **引擎页**：Schema 驱动表单（新增引擎不用改界面）+ 引擎「测试」按钮
 - ✅ **凭据页**：填完即写入 `.env`（600），用户永不接触该文件
 - ✅ 后台线程 + stdout 桥接：搜索不阻塞界面，且能拿到引擎的实时进度
-- ✅ 测试 265 → **846 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
+- ✅ 测试 265 → **851 项**（新增 GUI 的 offscreen 测试，含后台线程端到端）
 
 **顺带修掉一个真 bug**：`imgsearch/cli.py` 顶部会把非 UTF-8 的标准流
 重新包装，直接访问 `sys.stdout.buffer`。而 GUI 会把 stdout 换成自定义对象
@@ -886,3 +893,34 @@ class MyEngine(SearchEngine):
 - 🔎 Danbooru 经代理仍返回 403，需要账号凭据后再验证
   （目前尚未配置 `DANBOORU_LOGIN` / `DANBOORU_API_KEY`）
 - 🔎 样本量仅 10 张，若长期使用建议再抽一批复核阈值
+
+---
+
+**P6 — 引擎全配置化（2026-10）**
+
+目标：把「加一个引擎 = 写一个 Python 文件」变成「加一个引擎 = 填一张表」。
+
+- ✅ 两个通用适配器：**JSON**（点号路径 `data.creator`）与 **HTML**
+  （CSS 选择器 `td.image a@href`、整行 `:self`）
+- ✅ 5 个内置引擎全部改成配置预设 —— `imgsearch/engines/` 里**不再有站点专属代码**，
+  旧实现移到 `tests/legacy/` 只作双跑对比
+- ✅ 为此补了 9 项通用能力：限流、Cloudflare 绕过、两步请求、按排名估算相似度、
+  字段变换（`~strip_prefix` / `~regex` / `~tags_title`）、模板字段
+  （`第 {episode} 集 @ {from:time}`）、数组筛选（`edges[?isMain=true]`）、
+  链接主机白名单、按字段去重
+- ✅ **新建引擎向导**：选类型 → 填映射 → 点「测试」看原始响应 → 创建
+- ✅ 每一步都用**新旧双跑对比**验证（59 项，同一个响应两条路径逐字段比对）
+- ✅ 界面修正：勾选框白底块、高级设置改为真折叠（原先是禁用）、
+  设置页可滚动（原先会把输入框压到 14px）、批量日志显示配置名而不是类名
+
+**迁移中确认的两处损失**（如实记录，都有测试盯着）：
+
+- IQDB 的 `detail` 从「图库名 | 尺寸」变成只有图库名 —— 尺寸在相邻单元格，
+  soupsieve 在这个表格结构上 `nth-child` / 兄弟选择器取不到
+- SauceNAO 的高清直链少了「从 `ext_urls` 挑 `i.pximg.net`」那层回退 ——
+  那是「在数组里按子串筛选」，路径语法只支持按字段值筛选（`[?k=v]`）
+
+**回滚点**：`git tag v0.10-python-engines` 是最后一个「引擎=Python 文件」的版本。
+回滚时 `config.json` 也要一起切，否则新格式的配置旧代码读不了。
+
+测试数 754 → **851 项**。
