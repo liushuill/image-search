@@ -568,7 +568,9 @@ class DeclarativeEngine(SearchEngine):
         pixiv_id = self._field_text(get_text, "field_pixiv_id")
         # 有些站点只给 URL，不给 pixiv_id —— 交给 SearchResult 的归一化去补
         result = SearchResult(
-            source=self.DISPLAY_NAME,
+            # 用**配置里的**显示名：批量日志里会显示成「已识别 … JSON 适配器」，
+            # 用户根本不知道那指的是 SauceNAO
+            source=self.display_name or self.DISPLAY_NAME,
             similarity=similarity,
             pixiv_id=pixiv_id or None,
             artist=self._field_text(get_text, "field_artist") or None,

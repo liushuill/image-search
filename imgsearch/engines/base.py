@@ -175,6 +175,10 @@ class SearchEngine:
         # 配置里的名字（不是类的 NAME）—— 同一个适配器类挂多个实例时，
         # 配额文件、错误提示都该用它，否则界面会显示成「genericJson」
         self.engine_name = str(options.pop("engine_name", "") or "")
+        # 配置里的显示名（不是类的 DISPLAY_NAME）—— 搜索结果里
+        # 「引擎」这一列、批量日志的「已识别 … <引擎>」都用它。
+        # 同一个适配器类挂多个实例时，只有这个值能区分它们。
+        self.display_name = str(options.pop("display_name", "") or "")
         # 引擎特有字段（由 CONFIG_SCHEMA 声明，如 long_limit / login）
         self.options: Dict[str, Any] = dict(options)
 

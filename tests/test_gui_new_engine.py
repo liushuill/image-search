@@ -234,3 +234,70 @@ class TestWizardReachable:
 def qt_button():
     from PySide6 import QtWidgets
     return QtWidgets.QPushButton
+
+
+class TestEngineLabel:
+    """
+    批量日志与结果表里的「引擎」必须显示**配置的显示名**。
+
+    回归：适配器把 SearchResult.source 写成了类的 DISPLAY_NAME，
+    于是批量跑到一半，日志里全是「已识别 … JSON 适配器」——
+    用户根本不知道那指的是 SauceNAO。
+    """
+
+    def test_adapter_results_use_config_display_name(self, qapp):
+        import json
+
+        from imgsearch.engines.store import get_store
+
+        engine = get_store().build_engine("sauceNAO")
+        engine._request = lambda **k: json.dumps(  # type: ignore[assignment]
+            {"results": [{"header": {"similarity": "90"},
+                          "data": {"ext_urls": ["u"]}}]})
+        got = engine.search("/tmp/x.jpg")
+        assert got[0].source == "SauceNAO（Pixiv 覆盖最好）"
+        assert "适配器" not in got[0].source
+
+    def test_html_adapter_uses_config_display_name(self, qapp):
+        from imgsearch.engines.store import get_store
+
+        engine = get_store().build_engine("iqdb")
+        engine._request = lambda **k: (          # type: ignore[assignment]
+            '<div id="pages"><table><td class="image">'
+            '<a href="//k.com/1"><img src="//t/1.jpg"></a></td>'
+            '<td>88% similarity</td></table></div>')
+        got = engine.search("/tmp/x.jpg")
+        assert got[0].source == "IQDB（多图库聚合）"
+
+
+class TestAdvancedSection:
+    """
+    高级设置必须是「折叠 = 隐藏」，不能是「禁用」。
+
+    回归：原来用 QGroupBox(setCheckable=True)，Qt 在未勾选时**禁用**所有子控件，
+    于是引擎页上 31 个字段全是灰的、点不动 —— 看起来像界面坏了。
+    """
+
+    def test_advanced_fields_are_editable_when_expanded(self, qapp, store):
+        from imgsearch_gui.widgets.schema_form import SchemaForm
+        ec = store.get("sauceNAO")
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
+        form._advanced_toggle.setChecked(True)
+        qapp.processEvents()
+
+        advanced_keys = [f.key for f in ec.schema()
+                         if f.advanced and f.key in form._widgets]
+        assert advanced_keys, "sauceNAO 应当有高级字段"
+        for key in advanced_keys:
+            assert form._widgets[key].isEnabled(), f"{key} 展开后应当可编辑"
+
+    def test_collapsed_hides_instead_of_disabling(self, qapp, store):
+        from imgsearch_gui.widgets.schema_form import SchemaForm
+        ec = store.get("sauceNAO")
+        form = SchemaForm(ec.schema(), ec.settings, engine_name=ec.name)
+        assert form._advanced_toggle.isChecked() is False
+        # 折叠时不显示，但控件本身仍是可编辑的（不是禁用）
+        for f in ec.schema():
+            w = form._widgets.get(f.key)
+            if w is not None and f.advanced:
+                assert w.isEnabled(), f"{f.key} 折叠时不该被禁用"

@@ -145,6 +145,16 @@ QComboBox::drop-down {{ border: none; width: 20px; }}
    而不是一行普通文字。
    原因：页面底色是浅灰、卡片是白，勾选框原来透明 —— 放在灰色区域时
    它和描述文字长得一样，看不出「这里能勾」。 */
+QToolButton#SectionToggle {{
+    background: transparent;
+    border: none;
+    color: {MUTED};
+    font-size: 12px;
+    font-weight: 600;
+    padding: 2px 0;
+}}
+QToolButton#SectionToggle:hover {{ color: {TEXT}; }}
+
 QCheckBox {{
     spacing: 8px;
     background: {CARD};

@@ -950,7 +950,8 @@ class EngineStore:
                 f"     继承 SearchEngine 并实现 search() 的类"
             )
 
-        return cls(**ec.to_engine_kwargs(proxies=proxies), engine_name=ec.name)
+        return cls(**ec.to_engine_kwargs(proxies=proxies),
+                   engine_name=ec.name, display_name=ec.display_name)
 
 
 # ──────────────────────────────────────────────

@@ -69,12 +69,35 @@ class SchemaForm(QtWidgets.QWidget):
         basic_lay.setSpacing(14)
         outer.addWidget(basic)
 
-        advanced_box = QtWidgets.QGroupBox("高级设置")
-        advanced_box.setCheckable(True)
-        advanced_box.setChecked(False)
+        # 高级设置用**可折叠区块**，而不是 QGroupBox(checkable)。
+        # ⚠️ 可勾选的 QGroupBox 在未勾选时会**禁用**所有子控件 ——
+        # 于是「折叠」变成了「这一堆字段全是灰的、点不动」，
+        # 用户会以为界面坏了。这里改成：折叠 = 隐藏，展开 = 正常可编辑。
+        adv_toggle = QtWidgets.QToolButton()
+        adv_toggle.setText("高级设置")
+        adv_toggle.setObjectName("SectionToggle")
+        adv_toggle.setCheckable(True)
+        adv_toggle.setChecked(False)
+        adv_toggle.setArrowType(QtCore.Qt.RightArrow)
+        adv_toggle.setToolButtonStyle(QtCore.Qt.ToolButtonTextBesideIcon)
+        adv_toggle.setCursor(QtCore.Qt.PointingHandCursor)
+        adv_toggle.setAutoRaise(True)
+        outer.addWidget(adv_toggle, 0, QtCore.Qt.AlignLeft)
+
+        advanced_box = QtWidgets.QWidget()
         adv_lay = QtWidgets.QVBoxLayout(advanced_box)
+        adv_lay.setContentsMargins(0, 0, 0, 0)
         adv_lay.setSpacing(14)
+        advanced_box.setVisible(False)
         outer.addWidget(advanced_box)
+
+        def _toggle_advanced(on: bool) -> None:
+            adv_toggle.setArrowType(
+                QtCore.Qt.DownArrow if on else QtCore.Qt.RightArrow)
+            advanced_box.setVisible(on)
+
+        adv_toggle.toggled.connect(_toggle_advanced)
+        self._advanced_toggle = adv_toggle
 
         has_advanced = False
         # 「使用 API Key」只有在引擎真的声明了 secret 字段时才有意义。
@@ -106,7 +129,9 @@ class SchemaForm(QtWidgets.QWidget):
             if f.advanced:
                 has_advanced = True
             target.addWidget(self._build_row(f, settings.get(f.key, f.default)))
-        advanced_box.setVisible(has_advanced)
+        # 没有高级字段连标题一起藏掉；有的话按当前折叠状态决定是否显示
+        adv_toggle.setVisible(has_advanced)
+        advanced_box.setVisible(has_advanced and adv_toggle.isChecked())
         outer.addStretch(1)
 
     # ── 构建单个字段 ────────────────────────────
