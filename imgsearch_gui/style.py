@@ -126,6 +126,9 @@ QLineEdit, QSpinBox, QDoubleSpinBox, QComboBox, QPlainTextEdit, QTextEdit {{
     border: 1px solid {BORDER};
     border-radius: 6px;
     padding: 6px 9px;
+    /* 布局被挤压时的下限：低于这个高度连文字都画不出来
+       （下拉框曾被压到 14px，看起来就是「空的」） */
+    min-height: 16px;
     selection-background-color: {ACCENT};
     selection-color: #ffffff;
 }}
@@ -138,7 +141,36 @@ QLineEdit:disabled, QSpinBox:disabled, QDoubleSpinBox:disabled {{
     color: {MUTED};
 }}
 QComboBox::drop-down {{ border: none; width: 20px; }}
-QCheckBox {{ spacing: 8px; background: transparent; }}
+/* 勾选框：给它**自己的**白底 + 边框，做成一个「可点的控件」
+   而不是一行普通文字。
+   原因：页面底色是浅灰、卡片是白，勾选框原来透明 —— 放在灰色区域时
+   它和描述文字长得一样，看不出「这里能勾」。 */
+QCheckBox {{
+    spacing: 8px;
+    background: {CARD};
+    /* 比卡片边框稍深一档：白底在白卡片上才看得出这是一块「可点的区域」 */
+    border: 1px solid #d1d5db;
+    border-radius: 6px;
+    padding: 5px 10px;
+}}
+QCheckBox:hover {{ border-color: {ACCENT}; }}
+QCheckBox:disabled {{ color: {MUTED}; background: {BG}; border-color: {BORDER}; }}
+
+/* ⚠️ 给 QCheckBox 设了 border 之后，Qt 就**不再画原生指示器**
+   （实测：只改 background 还能画，一加 border 就消失，加 padding 更是彻底没有）。
+   所以这里必须自己把那个方框画出来，否则未勾选的选项看起来只是一行文字。
+   代价：勾选态是「实心蓝方块」而不是对勾 —— 在 QSS 里画对勾需要图片资源。 */
+QCheckBox::indicator {{
+    width: 14px;
+    height: 14px;
+    border: 1px solid #9ca3af;
+    border-radius: 3px;
+    background: {CARD};
+}}
+QCheckBox::indicator:hover {{ border-color: {ACCENT}; }}
+QCheckBox::indicator:checked {{ background: {ACCENT}; border-color: {ACCENT}; }}
+QCheckBox::indicator:disabled {{ background: {BG}; border-color: #d1d5db; }}
+QCheckBox::indicator:checked:disabled {{ background: #93c5fd; border-color: #93c5fd; }}
 
 /* ── 表格 ── */
 QTableWidget, QTableView {{

@@ -38,12 +38,26 @@ class SettingsPage(QtWidgets.QWidget):
         head.addWidget(reload_btn)
         outer.addLayout(head)
 
+        # 内容放进滚动区：设置项会越加越多，窗口高度不够时
+        # 之前会把里面的输入框压扁（下拉框甚至只剩 14px，文字画不出来）。
+        # 引擎页早已这么做了，这里保持一致。
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        self._content = QtWidgets.QWidget()
+        content_lay = QtWidgets.QVBoxLayout(self._content)
+        content_lay.setContentsMargins(0, 0, 8, 0)
+        content_lay.setSpacing(12)
+        scroll.setWidget(self._content)
+        outer.addWidget(scroll, 1)
+
         hint = QtWidgets.QLabel(
             "应用级配置。引擎各自的代理策略在「引擎」页里设（auto / 强制走 / 强制不走）。"
         )
         hint.setObjectName("PageHint")
         hint.setWordWrap(True)
-        outer.addWidget(hint)
+        content_lay.addWidget(hint)
 
         # ── 网络 ──
         net = self._card("网络 / 代理")
@@ -83,7 +97,7 @@ class SettingsPage(QtWidgets.QWidget):
         self.proxy_result.setObjectName("FieldHelp")
         self.proxy_result.setWordWrap(True)
         lay.addWidget(self.proxy_result)
-        outer.addWidget(net)
+        content_lay.addWidget(net)
 
         # ── 本地图库 ──
         lib = self._card("本地图库")
@@ -111,7 +125,7 @@ class SettingsPage(QtWidgets.QWidget):
         llay.addWidget(paths)
         # ⚠️ 必须挂进布局：否则局部变量 lib 出了作用域就被 GC，
         # 它里面的复选框会变成「已删除的 C++ 对象」，点保存直接崩。
-        outer.addWidget(lib)
+        content_lay.addWidget(lib)
 
         # ── 批量识别 ──
         batch = self._card("批量识别")
@@ -179,14 +193,14 @@ class SettingsPage(QtWidgets.QWidget):
         note.setObjectName("FieldHelp")
         note.setWordWrap(True)
         blay.addWidget(note)
-        outer.addWidget(batch)
+        content_lay.addWidget(batch)
 
         # ── 保存条 ──
         self.message = QtWidgets.QLabel()
         self.message.setObjectName("FieldHelp")
         self.message.setWordWrap(True)
-        outer.addWidget(self.message)
-        outer.addStretch(1)
+        content_lay.addWidget(self.message)
+        content_lay.addStretch(1)
 
         bar = QtWidgets.QHBoxLayout()
         bar.addStretch(1)
