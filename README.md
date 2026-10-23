@@ -1,10 +1,30 @@
 # image-search — 二次元图片溯源工具
 
+> ⚠️ **预发布（pre-release）** —— 本项目尚未正式发布，目前处于测试阶段。
+>
+> - **暂未进行 Windows 相关测试**（Linux 下已长期日常使用）
+> - 接口、配置格式、数据表结构仍可能变动；升级前请先备份 `data/`
+> - 许可为 [预发布许可](LICENSE)：**禁止商业使用**；修改后分发必须同样开源。
+>   正式版将改为 **GPL-3.0**
+> - 第三方组件许可见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)（Qt 为 LGPL-3.0）
+
 以图搜图，查出图片的原始出处（Pixiv / Danbooru / Twitter 等），并导出可批量下载的链接。
 
-- **核心层零 UI 依赖** —— `imgsearch/` 是纯 Python 包，CLI 与（未来的）GUI 共用同一套引擎
+- **核心层零 UI 依赖** —— `imgsearch/` 是纯 Python 包，CLI 与 GUI 共用同一套引擎
 - **凭据与配置分离** —— API Key 只放 `.env`（0600），绝不进 `config.json`、绝不入库
-- **Linux / Windows 同一份代码**，各自一个启动脚本
+- **Windows 理论上可用**（同一份代码 + 独立启动脚本），但**尚未实测**
+
+---
+
+## 声明：关于 AI 参与
+
+声明：本项目由作者使用AI完成。由于作者缺乏编程能力，作者实际的工作是：
+
+1. 讨论并明确项目的用途，架构。并以行为逻辑链条进行检查。
+2. 选择项目技术栈。为AI搜集资料以及提供相关文档，尽量避免其产生边界歪的偏差
+3. 测试并提出修改意见，交由AI修改。
+
+尽管作者尽可能地想了一些可能遇到的bug情况，并进行了针对性意见让AI修复。但仍可能遇到各种问题。请您谅解
 
 ---
 
@@ -619,6 +639,9 @@ image-search/
 ├── my_engines/                ← 自定义 Python 引擎（配置表达不了时才用）
 ├── tests/                     ← pytest（851 项）
 │   └── legacy/                ←   迁移前的 5 个 Python 引擎，仅作双跑对比
+├── LICENSE                    ← 预发布许可（禁止商用；正式版将改 GPL-3.0）
+├── THIRD_PARTY_NOTICES.md     ← 第三方组件许可（Qt 为 LGPL-3.0）
+├── LICENSES/                  ← LGPL-3.0 / GPL-3.0 全文
 ├── config.example.json        ← 默认配置模板（config.json 由首次运行生成，不入库）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
@@ -947,3 +970,15 @@ class MyEngine(SearchEngine):
 回滚时 `config.json` 也要一起切，否则新格式的配置旧代码读不了。
 
 测试数 754 → **851 项**。
+
+---
+
+## 许可
+
+- **本项目**：[预发布许可](LICENSE) —— 允许非商业使用与修改；
+  修改后分发须以同等许可开源；**禁止商业使用**。正式版将改为 **GPL-3.0**。
+- **第三方组件**：见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。
+  Qt / PySide6 使用 **LGPL-3.0**：本项目以动态链接方式使用、未修改其源码，
+  分发编译产物时会一并附带许可全文与组件告知（程序内「设置 → 第三方许可」
+  也可查看）。
+- **商业使用**：如需商用，请联系作者取得书面许可。

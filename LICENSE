@@ -1,0 +1,70 @@
+# image-search 预发布许可（Pre-Release License）
+
+版本：v0.11-pre
+状态：**预发布（pre-release）** —— 本项目尚未正式发布。
+
+---
+
+## 简短说明
+
+这是一份**临时许可**，用于预发布测试阶段。
+正式发布时，本项目将改为 **GNU GPL-3.0**。
+
+> 请注意：本许可**不是** OSI 认可的开源许可证（它禁止商业使用）。
+> 因此在描述本项目时，请写「源码公开（source-available）」，而不是「开源（open source）」。
+
+---
+
+## 你可以做的
+
+1. **使用**：出于任何非商业目的使用本软件，包括个人使用、学习、研究。
+2. **修改**：修改源码以满足自己的需要。
+3. **分发**：分发**未经修改**的原始副本（源码或编译产物），须保留本许可与
+   `THIRD_PARTY_NOTICES.md`。
+4. **分发修改版**：分发你修改后的版本，但**必须同时满足**以下全部条件：
+   - 以**本许可（或与之等效的许可）**发布；
+   - **公开完整对应源码**，且获取方式不劣于你分发二进制的方式；
+   - 明确标注你做了哪些修改；
+   - 保留原作者署名与本许可全文。
+
+## 你不可以做的
+
+1. **商业使用**。包括但不限于：
+   - 销售本软件或其修改版；
+   - 将本软件作为付费服务、付费产品、订阅内容的一部分提供；
+   - 在带有广告、收费墙或其他直接营利手段的产品中集成；
+   - 以本软件为基础提供收费的技术支持或定制服务（**除非**事先取得作者书面同意）。
+2. **移除或隐藏**版权声明、本许可、`THIRD_PARTY_NOTICES.md`。
+3. **用作者名义**为你的修改版背书。
+
+> 关于「商业使用」的疑问，请先联系作者确认，而不是自行解释。
+
+## 将来
+
+作者计划在正式发布时把本项目改为 **GPL-3.0**。该转换由版权持有人执行，
+届时会以新的 `LICENSE` 文件与发布说明为准。本许可下的既有授权不因此失效。
+
+---
+
+## 免责声明
+
+本软件按「现状」提供，**不附带任何明示或默示的担保**，包括但不限于对
+适销性、特定用途适用性、不侵权的担保。无论在何种情况下，作者均不对
+因使用本软件而产生的任何索赔、损害或其他责任负责。
+
+本工具仅查询第三方服务并输出链接与元数据，**不下载、不存储、不再分发
+任何第三方作品**。使用者应自行确保其使用行为符合当地法律及各服务条款。
+
+---
+
+## English Summary (non-binding)
+
+This is a **pre-release, source-available license** for a project that is not yet
+officially released. You may use, modify, and redistribute it **for
+non-commercial purposes only**. Redistributing a modified version requires
+releasing it under the same license **with full corresponding source code** and a
+clear note of your changes. **Commercial use is not permitted** without the
+author's prior written permission. The project is intended to move to
+**GPL-3.0** upon its first official release. Provided "as is", without warranty
+of any kind. This summary is for convenience only; the Chinese text above is
+authoritative.

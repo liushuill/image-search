@@ -257,3 +257,45 @@ class TestSearchWorker:
             assert errors and "已有搜索任务" in errors[0]
         finally:
             workers._RUN_LOCK.release()
+
+
+class TestThirdPartyNotices:
+    """
+    Qt 用 LGPL-3.0：分发编译产物时必须有「显著告知」。
+    程序内「设置 → 第三方许可」就是那条告知，不能丢。
+    """
+
+    def test_settings_has_licenses_button(self, qapp, store):
+        from imgsearch_gui.pages.settings_page import SettingsPage
+        page = SettingsPage()
+        try:
+            texts = [b.text() for b in page.findChildren(
+                __import__("PySide6.QtWidgets", fromlist=["QPushButton"]).QPushButton)]
+            assert "第三方许可" in texts
+        finally:
+            page.close()
+
+    @staticmethod
+    def _repo_root():
+        # ⚠️ 不能用 imgsearch.config.PROJECT_DIR —— 测试 fixture 会把它
+        # 重定向到临时目录（为了隔离 data/）。这里直接按文件位置定位仓库根。
+        from pathlib import Path
+        return Path(__file__).resolve().parent.parent
+
+    def test_notices_file_ships_with_the_repo(self):
+        notices = self._repo_root() / "THIRD_PARTY_NOTICES.md"
+        assert notices.is_file(), "第三方许可文件必须随仓库发布"
+        text = notices.read_text(encoding="utf-8")
+        assert "LGPL-3.0" in text
+        assert "Qt" in text
+
+    def test_license_texts_are_present(self):
+        for name in ("LGPL-3.0.txt", "GPL-3.0.txt"):
+            p = self._repo_root() / "LICENSES" / name
+            assert p.is_file(), f"缺少 {name}"
+            assert "GENERAL PUBLIC LICENSE" in p.read_text(encoding="utf-8").upper()
+
+    def test_project_license_is_pre_release(self):
+        text = (self._repo_root() / "LICENSE").read_text(encoding="utf-8")
+        assert "预发布" in text
+        assert "GPL-3.0" in text

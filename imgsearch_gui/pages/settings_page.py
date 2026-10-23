@@ -203,6 +203,11 @@ class SettingsPage(QtWidgets.QWidget):
         content_lay.addStretch(1)
 
         bar = QtWidgets.QHBoxLayout()
+        self.licenses_btn = QtWidgets.QPushButton("第三方许可")
+        self.licenses_btn.setToolTip(
+            "查看本项目使用的第三方组件及其许可（Qt 为 LGPL-3.0）")
+        self.licenses_btn.clicked.connect(self._show_licenses)
+        bar.addWidget(self.licenses_btn)
         bar.addStretch(1)
         self.save_btn = QtWidgets.QPushButton("保存设置")
         self.save_btn.setObjectName("Primary")
@@ -211,6 +216,47 @@ class SettingsPage(QtWidgets.QWidget):
         outer.addLayout(bar)
 
         self.reload()
+
+    # ── 第三方许可 ──────────────────────────────
+
+    def _show_licenses(self) -> None:
+        """
+        显示第三方组件许可。
+
+        Qt 用 LGPL-3.0：分发编译产物时必须有「显著告知」——用户需知道
+        程序用到了 Qt、且该 Qt 的使用受 LGPL 约束。程序内这个入口就是那条告知。
+        """
+        from imgsearch.config import PROJECT_DIR
+
+        text = ""
+        for candidate in (PROJECT_DIR / "THIRD_PARTY_NOTICES.md",
+                          PROJECT_DIR / "_internal" / "THIRD_PARTY_NOTICES.md"):
+            if candidate.is_file():
+                try:
+                    text = candidate.read_text(encoding="utf-8")
+                    break
+                except OSError:
+                    continue
+        if not text:
+            text = ("找不到 THIRD_PARTY_NOTICES.md。\n\n"
+                    "本项目使用 Qt / PySide6（LGPL-3.0）、Pillow、requests、"
+                    "lxml、BeautifulSoup、cloudscraper 等第三方组件，"
+                    "许可全文见仓库中的 LICENSES/ 目录。")
+
+        dlg = QtWidgets.QDialog(self)
+        dlg.setWindowTitle("第三方许可")
+        dlg.resize(760, 640)
+        lay = QtWidgets.QVBoxLayout(dlg)
+        view = QtWidgets.QPlainTextEdit(text)
+        view.setReadOnly(True)
+        lay.addWidget(view, 1)
+        row = QtWidgets.QHBoxLayout()
+        row.addStretch(1)
+        close = QtWidgets.QPushButton("关闭")
+        close.clicked.connect(dlg.accept)
+        row.addWidget(close)
+        lay.addLayout(row)
+        dlg.exec()
 
     # ── 小工具 ──────────────────────────────────
 
