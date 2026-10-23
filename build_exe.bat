@@ -26,7 +26,7 @@ echo.
 echo ============================================
 echo  请选择打包模式:
 echo    1 - CLI 模式 (命令行, run_cli.py)
-echo    2 - GUI 模式 (图形界面, gui.py)
+echo    2 - GUI 模式 (图形界面, run_gui.py)
 echo    3 - 全部打包
 echo ============================================
 echo.
@@ -65,7 +65,7 @@ if not "%MODE%"=="3" goto END
 :GUI_MODE
 echo.
 echo [打包 GUI 版本...]
-pyinstaller %COMMON_ARGS% --windowed --name "ImageTrace-GUI" --icon NONE gui.py
+pyinstaller %COMMON_ARGS% --windowed --name "ImageTrace-GUI" --icon NONE run_gui.py
 if %errorlevel% equ 0 (
     echo.
     echo  ✅ GUI 打包成功!
@@ -89,7 +89,7 @@ if %errorlevel% equ 0 (
 
 echo.
 echo [打包 GUI 版本...]
-pyinstaller %COMMON_ARGS% --windowed --name "ImageTrace-GUI" gui.py
+pyinstaller %COMMON_ARGS% --windowed --name "ImageTrace-GUI" run_gui.py
 if %errorlevel% equ 0 (
     echo.
     echo  ✅ GUI 打包成功!

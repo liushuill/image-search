@@ -67,7 +67,7 @@ run.bat engines list
 **已排除（可在 Linux 上验证的部分）**
 
 - 代码里没有平台特有 API（无 `os.startfile` / `winreg` / 硬编码盘符）
-- GUI **没有硬编码字体**（旧 tkinter 版写死了 `Microsoft YaHei UI`，Qt6 版没有）
+- GUI **没有硬编码字体**（Qt6 版跟随系统字体；旧 tkinter 版写死了 `Microsoft YaHei UI`）
 - 路径比较已按平台归一大小写（Windows 不敏感，否则重复/嵌套检测会失效）
 - venv 布局差异（`Scripts\python.exe`）由 `bootstrap.py` 统一处理
 - `.bat` 纯 ASCII、无 BOM、支持 `py -3`
@@ -114,13 +114,20 @@ chmod 600 .env
 SAUCENAO_KEY=xxx ./run.sh search 图片.jpg
 ```
 
-### 非敏感配置 → `config.json`
+### 非敏感配置 → `config.json`（本地文件，不入库）
+
+`config.json` 是**你自己机器上的**设置：代理地址、校准过的阈值、引擎启停。
+它**不进 git** —— 公开仓库里带别人的本地设置没有意义。
+
+首次运行会自动按默认值创建它。模板见 `config.example.json`。
 
 ```bash
 ./run.sh config show                       # 查看（凭据自动脱敏）
 ./run.sh config set proxy http://127.0.0.1:7897
 ./run.sh config set saucenao_key YOUR_KEY  # 敏感键会自动写入 .env
 ```
+
+> 想恢复默认：删掉 `config.json` 再启动（或 `./run.sh engines reset` 只重置引擎列表）。
 
 > ⚠️ 本机代理是 Clash Verge / mihomo，默认端口 **7897**，且**不是常开**。
 > 程序在代理不可用时会自动降级为直连并打印提示。
@@ -262,11 +269,16 @@ meta    (key, value)                                   内部元信息
 
 | 入库 | 不入库（`.gitignore`） |
 |---|---|
-| `imgsearch/` `imgsearch_gui/` `tests/` `plans/` | `.env`（含真实凭据） |
-| `config.json`（**无密钥**，只有引擎设置） | `data/` 下所有真实数据：SQLite 库、`thumbs/`、`cache/`、额度账本、备份 |
+| `imgsearch/` `imgsearch_gui/` `tests/` | **`config.json`**（你本机的设置：代理、阈值、启停） |
+| `config.example.json`（默认值模板） | `.env`（含真实凭据） |
+| `.env.example` `requirements*.txt` 启动脚本 | `data/` 下所有真实数据：SQLite 库、`thumbs/`、`cache/`、额度账本、备份 |
 | `data/.gitkeep` `output/.gitkeep`（空目录占位） | `output/` 下导出的结果 |
-| `.env.example` `requirements*.txt` 启动脚本 | `.venv/` `__pycache__/` `.pytest_cache/` |
-| `docs/`（留给真正的文档） | `docs/reference/`（从网页保存的参考素材，可重新获取） |
+| `docs/`（文档、配图、历史设计） | `docs/reference/`（从网页保存的参考素材，可重新获取） |
+| | `.venv/` `__pycache__/` `.pytest_cache/` |
+
+> `config.json` 曾经是入库的（想让 `git diff` 暴露默认值改动）。
+> 发布前改成不跟踪：它含个人设置，公开仓库里带着没有意义。
+> 现在由 `config.example.json` 承担「默认值长什么样」这个职责。
 
 > 早期那两份 Danbooru 参考网页直接躺在 `docs/` 里，**只是碰巧**被
 > `*Danbooru.html` 通配规则忽略。现在统一挪到 `docs/reference/` 并加了
@@ -607,6 +619,7 @@ image-search/
 ├── my_engines/                ← 自定义 Python 引擎（配置表达不了时才用）
 ├── tests/                     ← pytest（851 项）
 │   └── legacy/                ←   迁移前的 5 个 Python 引擎，仅作双跑对比
+├── config.example.json        ← 默认配置模板（config.json 由首次运行生成，不入库）
 ├── data/  output/             ← 运行时产物（已 gitignore）
 ├── imgsearch_gui/             ← PySide6 界面（薄壳，业务逻辑都在 imgsearch/）
 │   ├── main_window.py         ←   单窗口 + 侧栏
@@ -616,8 +629,8 @@ image-search/
 │   └── widgets/               ←   拖拽区 / Schema 表单 / 结果表
 ├── run.sh / run.bat           ← CLI 启动器（自动建 venv）
 ├── run-gui.sh / run-gui.bat   ← GUI 启动器
-├── run_cli.py                 ← 单文件入口（供打包用）
-├── gui.py                     ← 旧 tkinter GUI（待迁移到 PySide6）
+├── run_cli.py                 ← CLI 单文件入口（供打包用）
+├── run_gui.py                 ← GUI 单文件入口（供打包用）
 └── requirements*.txt          ← 依赖（唯一的依赖声明来源）
 ```
 
