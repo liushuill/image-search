@@ -45,11 +45,19 @@ class EnginesPage(QtWidgets.QWidget):
         head.addWidget(title)
         head.addStretch(1)
 
-        for text, slot in (("新建引擎…", self._new_engine_dialog),
-                           ("添加已有引擎", self._add_engine),
-                           ("生成模板", self._scaffold),
-                           ("恢复默认", self._reset)):
+        for text, slot, tip in (
+            ("新建引擎…", self._new_engine_dialog,
+             "用配置接一个新站点（选 JSON 或 HTML，填映射表），不需要写代码"),
+            ("生成 Python 模板", self._scaffold,
+             "配置表达不了的站点（多步流程、反爬、需要计算）才用这条：\n"
+             "先在 my_engines/ 生成一个骨架文件，你来写解析逻辑"),
+            ("登记 Python 引擎", self._add_engine,
+             "已经写好一个 Python 引擎文件（自己写的或别人给的）时，\n"
+             "用它把 模块路径 + 类名 登记到配置里"),
+            ("恢复默认", self._reset, "把引擎列表恢复成出厂设置（会丢掉自定义引擎）"),
+        ):
             btn = QtWidgets.QPushButton(text)
+            btn.setToolTip(tip)
             btn.clicked.connect(slot)
             head.addWidget(btn)
         outer.addLayout(head)
@@ -450,21 +458,35 @@ class EnginesPage(QtWidgets.QWidget):
             self.refresh(keep=dlg.created_name)
 
     def _add_engine(self) -> None:
-        name, ok = QtWidgets.QInputDialog.getText(self, "添加引擎", "引擎名称（配置名）：")
+        """
+        登记一个**已经写好的 Python 引擎类**。
+
+        这是配置表达不了时的兜底路径：
+        先用「生成 Python 模板」写一个文件，再回来把 模块路径 + 类名 登记进来。
+        """
+        name, ok = QtWidgets.QInputDialog.getText(
+            self, "登记 Python 引擎", "引擎名称（配置里的名字，英文）：")
         if not ok or not name.strip():
             return
         name = name.strip()
         module, ok2 = QtWidgets.QInputDialog.getText(
-            self, "添加引擎",
-            "模块路径（内置引擎留空即可；自定义引擎如 my_engines.mysite）：",
+            self, "登记 Python 引擎",
+            "模块路径（如 my_engines.mysite；对应 my_engines/mysite.py）：",
         )
-        class_name = ""
-        if ok2 and module.strip():
-            class_name, _ = QtWidgets.QInputDialog.getText(
-                self, "添加引擎", "类名（如 Mysite）："
-            )
+        if not ok2:
+            return
+        module = module.strip()
+        if not module:
+            QtWidgets.QMessageBox.information(
+                self, "这不用于新建站点",
+                "这个入口是给**已经写好**的 Python 引擎做登记的，必须填模块路径。\n\n"
+                "想接一个新站点：用「新建引擎…」（填配置，不用写代码）。")
+            return
+        class_name, _ = QtWidgets.QInputDialog.getText(
+            self, "登记 Python 引擎", "类名（文件里的 class 名，如 Mysite）："
+        )
         try:
-            self.store.add(name, module_path=module.strip(), class_name=class_name.strip())
+            self.store.add(name, module_path=module, class_name=class_name.strip())
         except ConfigError as e:
             QtWidgets.QMessageBox.warning(self, "无法添加", str(e))
             return
@@ -486,7 +508,7 @@ class EnginesPage(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(
             self, "已生成模板",
             "模板已生成到 my_engines/ 下。\n"
-            "实现 search() 后，用「添加自定义引擎」把它登记进来即可。",
+            "实现 search() 后，用「登记 Python 引擎」把它登记进来即可。",
         )
 
     def _reset(self) -> None:

@@ -17,7 +17,7 @@
 
 搜索引擎管理:
   imgsearch engines list                     # 查看所有引擎及权重
-  imgsearch engines add my_engine           # 添加自定义引擎
+  imgsearch engines add my_engine           # 登记一个引擎（自定义引擎要 --module/--class）
   imgsearch engines remove my_engine        # 删除自定义引擎
   imgsearch engines toggle ascii2d           # 启用/禁用引擎
   imgsearch engines move sauceNAO --down     # 向下移动引擎
@@ -567,7 +567,7 @@ def main():
   %(prog)s source toggle pixiv.re                 # 启用/禁用模板
   %(prog)s source reset                           # 恢复默认模板
   %(prog)s engines list                           # 查看所有引擎及权重
-  %(prog)s engines add my_engine                  # 添加自定义引擎
+  %(prog)s engines add my_engine                  # 登记一个引擎
   %(prog)s engines remove my_engine               # 删除自定义引擎
   %(prog)s engines toggle ascii2d                 # 启用/禁用引擎
   %(prog)s engines move sauceNAO --down           # 向下移动引擎
