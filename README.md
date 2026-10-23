@@ -973,6 +973,13 @@ class MyEngine(SearchEngine):
 
 ---
 
+## 打包状态
+
+**目前没有发布任何编译产物。** 打包前必须完成的事项（数据目录改造、
+Qt 合规核对、体积记录等）见 [docs/packaging-notes.md](docs/packaging-notes.md)。
+
+实测参考：Linux 下 `--onedir` 约 **204 MB**，压缩后约 **60 MB**。
+
 ## 许可
 
 - **本项目**：[预发布许可](LICENSE) —— 允许非商业使用与修改；
