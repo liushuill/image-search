@@ -78,6 +78,9 @@ class SearchPage(QtWidgets.QWidget):
 
         ol.addWidget(self._label("搜索引擎"))
         self.engine_combo = QtWidgets.QComboBox()
+        # ⚠️ 默认策略下，下拉框会被左栏宽度压窄，
+        #    「自动（按权重依次尝试）」末尾的字会被裁掉（实测差 9px）。
+        #    这里按最长的条目文字实测宽度定最小宽度（见 _fit_engine_combo）。
         ol.addWidget(self.engine_combo)
 
         self.refresh_check = QtWidgets.QCheckBox("重新搜索（忽略图库缓存）")
@@ -175,8 +178,7 @@ class SearchPage(QtWidgets.QWidget):
         current = self.engine_combo.currentData()
         self.engine_combo.clear()
         self.engine_combo.addItem("自动（按权重依次尝试）", "auto")
-        store = get_store()
-        for ec in store.list_all():
+        for ec in get_store().list_all():
             mark = "" if ec.enabled else "（已禁用）"
             self.engine_combo.addItem(f"{ec.display_name} {mark}".strip(), ec.name)
         # 还原选择
@@ -184,6 +186,22 @@ class SearchPage(QtWidgets.QWidget):
             idx = self.engine_combo.findData(current)
             if idx >= 0:
                 self.engine_combo.setCurrentIndex(idx)
+        self._fit_engine_combo()
+
+    def _fit_engine_combo(self) -> None:
+        """
+        让引擎下拉框至少能装下最长的那条文字。
+
+        单纯调 setSizeAdjustPolicy 不行：它的 sizeHint 只按「字符数」估，
+        而中文是宽字符，估出来偏小（实测要 235px，估成 146px）。
+        """
+        fm = self.engine_combo.fontMetrics()
+        widths = [fm.horizontalAdvance(self.engine_combo.itemText(i))
+                  for i in range(self.engine_combo.count())]
+        if not widths:
+            return
+        need = max(widths) + 44          # +44：下拉箭头、内边距、边框
+        self.engine_combo.setMinimumWidth(max(need, 180))
 
     # ── 选图 ────────────────────────────────────
 

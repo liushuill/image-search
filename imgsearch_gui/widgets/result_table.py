@@ -111,6 +111,16 @@ class ResultTable(QtWidgets.QTableWidget):
         header.setSectionResizeMode(COL_TITLE, QtWidgets.QHeaderView.Stretch)
         header.setSectionResizeMode(COL_IDS, QtWidgets.QHeaderView.ResizeToContents)
         header.setSectionResizeMode(COL_URL, QtWidgets.QHeaderView.Stretch)
+        # ⚠️ Stretch 的两列（标题 / 来源链接）在窗口变窄时会被压到比列头还窄，
+        #    列头就被截成「题 / 作,」这种。给所有列一个下限：
+        #    宁可出现横向滚动条，也不要字被切掉。
+        # 最长的列头是「标题 / 作品」(72px)，加内边距取 88
+        fm = header.fontMetrics()
+        model = self.model()
+        need = max([fm.horizontalAdvance(str(model.headerData(
+            c, QtCore.Qt.Horizontal, QtCore.Qt.DisplayRole) or ""))
+            for c in range(model.columnCount())] or [0]) + 16
+        header.setMinimumSectionSize(max(need, 64))
 
         self._results: List[SearchResult] = []
         self.doubleClicked.connect(self._open_current)
@@ -137,20 +147,20 @@ class ResultTable(QtWidgets.QTableWidget):
                 sim.setForeground(QtGui.QColor(style.MUTED))
             self.setItem(row, COL_SIM, sim)
 
-            self.setItem(row, COL_ENGINE, QtWidgets.QTableWidgetItem(r.source or ""))
+            self._put(row, COL_ENGINE, r.source or "")
 
             pixiv = r.pixiv_image_id() if r.pixiv_id else ""
-            self.setItem(row, COL_PIXIV, QtWidgets.QTableWidgetItem(pixiv or ""))
+            self._put(row, COL_PIXIV, pixiv or "")
 
-            self.setItem(row, COL_ARTIST, QtWidgets.QTableWidgetItem(r.artist or ""))
+            self._put(row, COL_ARTIST, r.artist or "")
 
             title = " / ".join(x for x in (r.title, r.material) if x)
-            item = QtWidgets.QTableWidgetItem(title)
+            item = self._put(row, COL_TITLE, title)
             if r.detail:
-                item.setToolTip(r.detail)
+                item.setToolTip(r.detail + (f"\n{title}" if title else ""))
             self.setItem(row, COL_TITLE, item)
 
-            self.setItem(row, COL_IDS, QtWidgets.QTableWidgetItem(site_ids(r)))
+            self._put(row, COL_IDS, site_ids(r))
 
             url = best_url(r)
             link = QtWidgets.QTableWidgetItem(url)
@@ -163,6 +173,19 @@ class ResultTable(QtWidgets.QTableWidget):
         # 缩略图列需要固定行高（resizeRowsToContents 会把它压扁）
         for row in range(self.rowCount()):
             self.setRowHeight(row, max(ROW_HEIGHT, self.rowHeight(row)))
+
+    def _put(self, row: int, col: int, text: str) -> QtWidgets.QTableWidgetItem:
+        """
+        放一个文字单元格，并把全文设为 tooltip。
+
+        为什么需要：窗口不宽时列会被压窄，长文字（引擎名、站点 ID）会被省略号
+        截断。上一版只给标题和链接加了 tooltip，其余列看不到全文。
+        """
+        item = QtWidgets.QTableWidgetItem(text)
+        if text:
+            item.setToolTip(text)
+        self.setItem(row, col, item)
+        return item
 
     def _set_thumb_cell(self, row: int, r: SearchResult) -> None:
         """把缩略图放进单元格（先放占位，图到了再替换）"""

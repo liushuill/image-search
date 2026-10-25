@@ -32,8 +32,26 @@ class BatchDialog(QtWidgets.QDialog):
         self._worker: BatchWorker | None = None
         self.report = None
 
-        outer = QtWidgets.QVBoxLayout(self)
+        # ⚠️ 内容总高约 1040px，1080p 屏幕上只剩 ~1040 可用 —— 卡在临界点，
+        #    再小一点（1366×768 很常见）就会把日志区压成一行。
+        #    所以内容放进滚动区，底部按钮栏固定在外部：
+        #    大屏幕时和以前一样，小屏幕时出现滚动条而不是裁字。
+        shell = QtWidgets.QVBoxLayout(self)
+        shell.setSpacing(8)
+        shell.setContentsMargins(0, 0, 0, 0)
+
+        scroll = QtWidgets.QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QtWidgets.QFrame.NoFrame)
+        scroll.setHorizontalScrollBarPolicy(QtCore.Qt.ScrollBarAlwaysOff)
+        shell.addWidget(scroll, 1)
+
+        content = QtWidgets.QWidget()
+        self._content = content          # _fit_to_screen 需要它的 sizeHint
+        outer = QtWidgets.QVBoxLayout(content)
+        outer.setContentsMargins(16, 12, 16, 8)
         outer.setSpacing(12)
+        scroll.setWidget(content)
 
         head = QtWidgets.QLabel("把整个目录里的图逐个识别出来")
         head.setObjectName("SectionTitle")
@@ -143,6 +161,7 @@ class BatchDialog(QtWidgets.QDialog):
         outer.addWidget(self.log)
 
         bar = QtWidgets.QHBoxLayout()
+        bar.setContentsMargins(16, 6, 16, 12)
         self.preview_btn = QtWidgets.QPushButton("重新预览")
         self.preview_btn.clicked.connect(self.refresh_plan)
         bar.addWidget(self.preview_btn)
@@ -156,9 +175,30 @@ class BatchDialog(QtWidgets.QDialog):
         self.start_btn.setObjectName("Primary")
         self.start_btn.clicked.connect(self._start)
         bar.addWidget(self.start_btn)
-        outer.addLayout(bar)
+        shell.addLayout(bar)
 
+        self._fit_to_screen()
         self.refresh_plan()
+
+    def _fit_to_screen(self) -> None:
+        """
+        按内容需要的尺寸开窗，但不超过屏幕可用区的 92%。
+
+        不这么做的话，窗口会以 sizeHint 打开 —— 在 1366×768 这类屏幕上
+        直接超出屏幕下沿，底部控件被挤到看不见。
+        """
+        # ⚠️ 不能用 self.sizeHint()：QScrollArea 不把内容的尺寸传导给窗口，
+        #    那样算出来只有 360px 高。要用内容控件自己的 sizeHint。
+        hint = self._content.sizeHint()
+        screen = self.screen() or QtWidgets.QApplication.primaryScreen()
+        if screen is None:
+            self.resize(max(760, hint.width()), min(hint.height(), 900))
+            return
+        avail = screen.availableGeometry()
+        self.resize(
+            min(hint.width(), int(avail.width() * 0.92)),
+            min(hint.height(), int(avail.height() * 0.92)),
+        )
 
     # ── 预览 ────────────────────────────────────
 

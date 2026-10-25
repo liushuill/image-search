@@ -25,7 +25,23 @@ def create_app(argv=None) -> QtWidgets.QApplication:
     app.setOrganizationName("image-search")
     app.setStyle("Fusion")
     app.setStyleSheet(style.QSS)
+
+    wire_quit_cleanup(app)
     return app
+
+
+def wire_quit_cleanup(app: QtWidgets.QApplication) -> None:
+    """
+    退出前停掉后台缩略图线程。
+
+    ⚠️ QThread 还在跑就被销毁，Qt 会直接 abort 整个进程
+    （实测 exit 134 / 核心转储；pytest 里表现为一大段 "Extension modules:"）。
+    这个清理以前**只在测试收尾里手动调过**，真实运行时没人接 ——
+    关窗口时正好在加载缩略图就会崩。所以这里接到 aboutToQuit 上。
+    """
+    from imgsearch_gui.widgets.thumbnails import stop_all_loaders
+
+    app.aboutToQuit.connect(stop_all_loaders)
 
 
 def main() -> int:

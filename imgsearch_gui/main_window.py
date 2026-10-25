@@ -129,7 +129,7 @@ class MainWindow(QtWidgets.QMainWindow):
     # ── 窗口几何 ────────────────────────────────
 
     # 偏好的初始尺寸与最小尺寸（放不下时会自动让步，见下）
-    _PREFERRED_SIZE = (1180, 760)
+    _PREFERRED_SIZE = (1240, 780)   # 结果表 8 列在 1180 下会触发横向滚动
     _PREFERRED_MIN = (820, 560)
 
     def _apply_initial_geometry(self) -> None:
