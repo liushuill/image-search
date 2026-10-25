@@ -10,31 +10,23 @@
 
 error 5 = 拒绝访问。Qt 把本地路径转成 `file://` URL 再交给 ShellExecute。
 
-⚠️ **一个尚未查清的边界（2026-10）**：
+⚠️ **一次误判的经过（2026-10，已澄清）**
 
-有用户报告打开文件夹报 ``ShellExecute ... failed (error 5)``，而路径本身正常。
-诊断发现**那次运行的会话**没有桌面外壳：低完整性（``S-1-16-4096``）、
-``tasklist`` 里没有 ``explorer.exe``。打开**文件夹**必须请正在运行的 Explorer
-代劳，没有它 → UIPI 拒绝 → ``error 5``；打开**文件**走文件关联直接起子进程，
-不需要 shell，所以成功。
+曾出现打开文件夹报 ``ShellExecute ... failed (error 5)``，一度被归因为
+「Windows 上 ``os.startfile`` 对目录不可靠」甚至「这台机器没有桌面外壳」。
+在正常桌面会话（Medium 完整性、``explorer.exe`` 在跑）里实测后确认：
 
-但报告者的桌面是 Medium 完整性 —— 两者不是同一个上下文，**到底是哪次运行
-落在了无 shell 的会话里尚未确认**。所以：
-- 「Windows 上 ``os.startfile(目录)`` 不可靠」这个说法**没有证据**，已撤回；
-- 普通桌面下的行为**仍未实测**；
-- 本模块先探测 :func:`has_shell`，无 shell 时给出准确原因，
-  不再把「explorer 起来就死」当成"打开成功"（那是假阳性，用户看到的是"点了没反应"）。
+    GetShellWindow() = 3278634   （非 0，有外壳）
+    os.startfile(目录) → 成功
 
-所以这里做三级兜底，只要有一条成功就算打开：
+**代码没问题，桌面下能正常打开。** 当初的失败是因为程序从**无桌面外壳的
+沙箱会话**里启动（低完整性）：打开文件夹必须请 Explorer 代劳，没有它就会被
+UIPI 拒绝；而打开文件走文件关联、直接起子进程，所以同一会话里文件反而成功。
 
-1. ``os.startfile(原生路径)`` —— 最快，绝大多数机器可用
-2. ``explorer 路径`` / ``explorer /select,路径``
-   —— 直接拉资源管理器，**绕开 ShellExecute 的动词解析**，
-      在 1 失败的那些机器上通常有效
-3. ``QDesktopServices.openUrl`` —— 最后的跨平台兜底
-
-失败时把每一级的原因记在 :func:`last_error` 里，界面可以原样显示，
-而不是只给用户一句「打不开」。
+保留的三层结构仍然有意义：
+- ``os.startfile`` **总是先试**（GetShellWindow 可能偶发为 0，不能因此误拒）
+- 只有在确认无外壳时才跳过 explorer / Qt，并给出准确原因
+- explorer 的「启动成功但立刻退出」判定为失败 —— 那是「点了没反应」的来源
 """
 
 import os
@@ -152,23 +144,27 @@ def open_path(target) -> bool:
 
     is_dir = Path(text).is_dir()
 
-    # 目录 + 没有 shell：这条路根本走不通，直接说清楚。
-    # 不再去调 os.startfile / Qt —— 它们只会各抛一次 error 5，
-    # 在控制台留下噪声，还让用户以为是自己路径的问题。
-    if is_dir and not has_shell():
-        return _fail("open_path", OSError(
-            "当前会话没有 Explorer 桌面外壳（低完整性/无桌面会话），"
-            "无法打开文件夹；文件仍然可以直接打开"))
-
     tried = False
 
     if os.name == "nt":
         tried = True
+        # 第一级：os.startfile。**无论有没有 shell 都先试** ——
+        # GetShellWindow() 可能偶发返回 0（shell 正在重启等），
+        # 不该因此把能用的用户挡在外面。
         try:
             os.startfile(text)              # type: ignore[attr-defined]
             return _ok()
         except (OSError, AttributeError) as exc:
             _fail("os.startfile", exc)
+
+        # 目录 + 确认没有 shell：后续两级必然失败（要请 Explorer 代劳），
+        # 直接给准确原因，别让用户在控制台看一串 error 5。
+        if is_dir and not has_shell():
+            _fail("open_path", OSError(
+                "当前会话没有 Explorer 桌面外壳（低完整性/无桌面会话），"
+                "无法打开文件夹；文件仍然可以直接打开"))
+            return False
+
         # 第二级：直接拉资源管理器（仅在有 shell 时有意义）
         if _explorer_launch(text, is_dir):
             return True

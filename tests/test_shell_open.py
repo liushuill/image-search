@@ -139,9 +139,15 @@ class TestNoShellSession:
     """
 
     def test_dir_without_shell_fails_with_explanation(self, tmp_path, monkeypatch):
-        # ⚠️ 这里**不能**把 os.name 改成 "nt"：pathlib.Path 的工厂会在调用时
-        #    按 os.name 选 WindowsPath，于是 Path("/tmp/...") 变成 WindowsPath、
-        #    is_dir() 直接 False —— 测的就不是想测的分支了。
+        # ⚠️ pathlib.Path 的工厂会**在调用时**按 os.name 选 WindowsPath，
+        #    于是 Path("/tmp/...") 变成 WindowsPath、is_dir() 直接 False。
+        #    所以这里把 shell_open 里的 Path 固定成 PosixPath。
+        import pathlib as _pl
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(os, "startfile",
+                            lambda p: (_ for _ in ()).throw(OSError("error 5")),
+                            raising=False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
         monkeypatch.setattr(
             shell_open.QtGui.QDesktopServices, "openUrl",
@@ -153,8 +159,10 @@ class TestNoShellSession:
 
     def test_file_without_shell_still_tries_startfile(self, tmp_path, monkeypatch):
         """文件走文件关联，不需要 shell —— 这条不能一并否掉"""
+        import pathlib as _pl
         calls = []
         monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
         monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
 
