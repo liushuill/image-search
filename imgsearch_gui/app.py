@@ -27,7 +27,36 @@ def create_app(argv=None) -> QtWidgets.QApplication:
     app.setStyleSheet(style.QSS)
 
     wire_quit_cleanup(app)
+    warn_if_low_integrity()
     return app
+
+
+def warn_if_low_integrity() -> None:
+    """
+    启动时检查本进程的完整性级别，Low 就明确警告。
+
+    ⚠️ 这条必须放在 **GUI 进程**里，而不是 bootstrap：实测那次 bootstrap 跑在
+    系统 Python（Medium）上，而真正跑界面的 venv python 是 Low —— 放在
+    bootstrap 里永远不会触发。
+
+    低完整性（沙箱/受限会话）会带来一串"看起来像代码 bug"的怪象：
+    打开文件夹一律 ShellExecute error 5、explorer 子进程 0xC0000142。
+    """
+    from imgsearch_gui import shell_open
+
+    level = shell_open.process_integrity()
+    if level != "Low":
+        return
+    import sys as _sys
+    print(
+        "[image-search] ⚠️ 当前进程运行在低完整性（S-1-16-4096）环境中。\n"
+        "[image-search]    症状：打开文件夹会失败（ShellExecute error 5），\n"
+        "[image-search]          explorer 子进程起不来（0xC0000142）。\n"
+        "[image-search]    原因：这个 venv 是在低完整性会话里创建的，\n"
+        "[image-search]          或者它所在的**上级目录**带 Low 标签（会被继承）。\n"
+        "[image-search]    处理：把项目整个移到普通目录（如 C:\\Users\\你\\image-search）\n"
+        "[image-search]          再重建 .venv —— 只删 .venv 不挪目录是不行的。",
+        file=_sys.stderr, flush=True)
 
 
 def wire_quit_cleanup(app: QtWidgets.QApplication) -> None:

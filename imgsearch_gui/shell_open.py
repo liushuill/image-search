@@ -76,7 +76,69 @@ def _shell_context() -> str:
     # 报错时能直接看出是不是"用了另一个解释器"
     parts.append(f"Python {_sys.version.split()[0]}")
     parts.append(f"{_sys.executable}")
+    level = process_integrity()
+    if level:
+        parts.append(f"进程完整性={level}")
     return "（" + "；".join(parts) + "）"
+
+def process_integrity() -> str:
+    """
+    当前进程的完整性级别：``"Low"`` / ``"Medium"`` / ``"High"`` / ``""``。
+
+    为什么需要：实测遇到过一类极难查的故障 —— **venv 所在目录带 Low 标签**，
+    继承下来后 venv 里的 python 也跑在 Low 完整性，于是打开文件夹一律
+    ``ShellExecute`` error 5、``explorer`` 子进程 0xC0000142，而测试、渲染、
+    CLI 全部正常，看起来像"代码有 bug"。
+
+    实现：先用 ctypes 直接读进程令牌（不依赖 whoami 能否启动 —— 这次就踩过
+    它在 GUI 进程里拿不到输出的坑），失败再退回 ``whoami /groups``。
+    """
+    if os.name != "nt":
+        return ""
+    try:
+        import ctypes
+        from ctypes import wintypes
+
+        advapi = ctypes.windll.advapi32            # type: ignore[attr-defined]
+        kernel = ctypes.windll.kernel32            # type: ignore[attr-defined]
+        token = wintypes.HANDLE()
+        if advapi.OpenProcessToken(kernel.GetCurrentProcess(), 0x0008,
+                                   ctypes.byref(token)):
+            try:
+                size = wintypes.DWORD(0)
+                advapi.GetTokenInformation(token, 25, None, 0, ctypes.byref(size))
+                if size.value:
+                    buf = ctypes.create_string_buffer(size.value)
+                    if advapi.GetTokenInformation(token, 25, buf, size,
+                                                  ctypes.byref(size)):
+                        sid = ctypes.cast(buf, ctypes.POINTER(ctypes.c_void_p))[0]
+                        advapi.GetSidSubAuthorityCount.restype = ctypes.c_void_p
+                        pcount = advapi.GetSidSubAuthorityCount(sid)
+                        count = ctypes.cast(
+                            pcount, ctypes.POINTER(ctypes.c_ubyte))[0]
+                        advapi.GetSidSubAuthority.restype = ctypes.c_void_p
+                        psub = advapi.GetSidSubAuthority(sid, count - 1)
+                        rid = ctypes.cast(psub, ctypes.POINTER(wintypes.DWORD))[0]
+                        names = {0x1000: "Low", 0x2000: "Medium",
+                                 0x3000: "High"}
+                        return names.get(rid, f"0x{rid:04x}")
+            finally:
+                kernel.CloseHandle(token)
+    except Exception:                                     # noqa: BLE001
+        pass
+
+    try:                                    # 兜底：ctypes 不可用时再问 whoami
+        import re as _re
+        out = subprocess.run(["whoami", "/groups"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return ""
+    m = _re.search(r"S-1-16-(\d+)", out)
+    if not m:
+        return ""
+    return {"4096": "Low", "8192": "Medium", "12288": "High"}.get(
+        m.group(1), "S-1-16-" + m.group(1))
+
 
 
 def _fail(step: str, exc: BaseException) -> bool:
@@ -84,6 +146,18 @@ def _fail(step: str, exc: BaseException) -> bool:
     prev = f"{_last_error}；" if _last_error else ""
     _last_error = f"{prev}{step}: {type(exc).__name__}: {exc}"
     return False
+
+
+def _is_dir(text) -> bool:
+    """
+    判断是不是目录。
+
+    抽成函数是为了**可测试**：测试要模拟「Windows 上路径是目录」时，
+    只能去 patch pathlib.Path —— 而 ``Path`` 的工厂会在调用时按 ``os.name``
+    选 WindowsPath/PosixPath，于是 PosixPath 在真 Windows 上直接抛
+    ``UnsupportedOperation``（真实 CI 上就炸过）。patch 这个函数两个平台都能跑。
+    """
+    return Path(text).is_dir()
 
 
 def has_shell() -> bool:
@@ -180,7 +254,7 @@ def open_path(target) -> bool:
         _fail("open_path", ValueError("路径为空"))
         return False
 
-    is_dir = Path(text).is_dir()
+    is_dir = _is_dir(text)
 
     tried = False
 
@@ -229,7 +303,7 @@ def open_dir(target) -> bool:
     OSError，静默失败比弹一个看不懂的系统错误更好。
     """
     path = Path(target)
-    if not path.is_dir():
+    if not _is_dir(path):
         _fail("open_dir", FileNotFoundError(f"目录不存在：{path}"))
         return False
     return open_path(path)

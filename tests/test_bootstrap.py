@@ -169,10 +169,12 @@ class TestMain:
         recorded = {}
         monkeypatch.setattr(bootstrap, "ensure_venv", lambda: Path("py"))
         monkeypatch.setattr(bootstrap, "ensure_dependencies", lambda py, spec: None)
+        # main() 里还会调用 whoami 做完整性检查，假函数必须能吃任意关键字
+        monkeypatch.setattr(bootstrap, "warn_if_low_integrity", lambda: None)
 
-        def fake_run(cmd, env=None):
+        def fake_run(cmd, *args, **kwargs):
             recorded["cmd"] = cmd
-            recorded["env"] = env
+            recorded["env"] = kwargs.get("env")
             return type("R", (), {"returncode": 7})()
 
         monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
@@ -187,8 +189,9 @@ class TestMain:
         recorded = {}
         monkeypatch.setattr(bootstrap, "ensure_venv", lambda: Path("py"))
         monkeypatch.setattr(bootstrap, "ensure_dependencies", lambda py, spec: None)
+        monkeypatch.setattr(bootstrap, "warn_if_low_integrity", lambda: None)
         monkeypatch.setattr(bootstrap.subprocess, "run",
-                            lambda cmd, env=None: recorded.update(cmd=cmd)
+                            lambda cmd, *a, **k: recorded.update(cmd=cmd)
                             or type("R", (), {"returncode": 0})())
         bootstrap.main(["gui"])
         assert recorded["cmd"][1:] == ["-m", "imgsearch_gui"]

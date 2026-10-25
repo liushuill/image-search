@@ -34,18 +34,15 @@ class TestOpenPath:
         assert shell_open.open_path(r"C:\Users\a\output") is True
         assert calls == [r"C:\Users\a\output"]
 
-    def test_windows_file_uses_startfile(self, tmp_path, monkeypatch):
+    def test_windows_file_uses_startfile(self, monkeypatch):
         """文件仍走 os.startfile（文件关联不需要 shell，实测可用）"""
-        import pathlib as _pl
         calls = []
         monkeypatch.setattr(os, "name", "nt")
-        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(shell_open, "_is_dir", lambda t: False)
         monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
 
-        f = tmp_path / "a.png"
-        f.write_bytes(b"x")
-        assert shell_open.open_path(str(f)) is True
-        assert calls == [str(f)]
+        assert shell_open.open_path(r"C:\x\a.png") is True
+        assert calls == [r"C:\x\a.png"]
 
     def test_windows_falls_back_to_qt_on_error(self, monkeypatch):
         opened = []
@@ -64,10 +61,9 @@ class TestOpenPath:
 
     def test_windows_dir_falls_back_to_explorer(self, tmp_path, monkeypatch):
         """ShellExecuteW 失败 → 用 explorer 打开目录；成功时不再走 Qt"""
-        import pathlib as _pl
         calls = []
         monkeypatch.setattr(os, "name", "nt")
-        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(shell_open, "_is_dir", lambda t: True)
         monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: True)
         monkeypatch.setattr(
@@ -153,12 +149,10 @@ class TestNoShellSession:
     """
 
     def test_dir_without_shell_fails_with_explanation(self, tmp_path, monkeypatch):
-        # ⚠️ pathlib.Path 的工厂会**在调用时**按 os.name 选 WindowsPath，
-        #    于是 Path("/tmp/...") 变成 WindowsPath、is_dir() 直接 False。
-        #    所以这里把 shell_open 里的 Path 固定成 PosixPath。
-        import pathlib as _pl
+        # 不要 patch pathlib.Path：PosixPath 在真 Windows 上会抛
+        # UnsupportedOperation。改 patch 产品代码里的 _is_dir。
         monkeypatch.setattr(os, "name", "nt")
-        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(shell_open, "_is_dir", lambda t: True)
         monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
         monkeypatch.setattr(
@@ -169,19 +163,16 @@ class TestNoShellSession:
         err = shell_open.last_error()
         assert "Explorer" in err and "文件夹" in err
 
-    def test_file_without_shell_still_tries_startfile(self, tmp_path, monkeypatch):
+    def test_file_without_shell_still_tries_startfile(self, monkeypatch):
         """文件走文件关联，不需要 shell —— 这条不能一并否掉"""
-        import pathlib as _pl
         calls = []
         monkeypatch.setattr(os, "name", "nt")
-        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(shell_open, "_is_dir", lambda t: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
         monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
 
-        f = tmp_path / "a.png"
-        f.write_bytes(b"x")
-        assert shell_open.open_path(str(f)) is True
-        assert calls == [str(f)]
+        assert shell_open.open_path(r"C:\x\a.png") is True
+        assert calls == [r"C:\x\a.png"]
 
     def test_explorer_is_never_used_without_shell(self, monkeypatch):
         """无 shell 时绝不能调 explorer —— 它必然立刻死，属于假阳性来源"""
@@ -237,6 +228,38 @@ class TestShellContextInError:
         shell_open.open_path("C:/x")
         err = shell_open.last_error()
         assert "GetShellWindow=0" in err and "Python 3.14.5" in err
+
+
+class TestIntegrityDetection:
+    def test_posix_has_no_integrity(self, monkeypatch):
+        monkeypatch.setattr(os, "name", "posix")
+        assert shell_open.process_integrity() == ""
+
+    def test_gui_warns_only_on_low(self, monkeypatch, capsys):
+        import imgsearch_gui.app as app_mod
+        from imgsearch_gui import shell_open as so
+
+        monkeypatch.setattr(so, "process_integrity", lambda: "Medium")
+        app_mod.warn_if_low_integrity()
+        assert "低完整性" not in capsys.readouterr().err
+
+        monkeypatch.setattr(so, "process_integrity", lambda: "Low")
+        app_mod.warn_if_low_integrity()
+        err = capsys.readouterr().err
+        assert "低完整性" in err and "C0000142".upper() in err.upper()
+
+
+class TestShellContext:
+    def test_context_includes_integrity(self, monkeypatch):
+        """失败信息要带进程完整性 —— 这是区分"代码 bug"和"Low 环境"的关键"""
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "process_integrity", lambda: "Low")
+        ctx = shell_open._shell_context()
+        assert "进程完整性=Low" in ctx
+        assert "Python" in ctx
+
+    def test_context_is_empty_on_posix(self):
+        assert shell_open._shell_context() == ""
 
 
 class TestOpenUrl:
