@@ -51,6 +51,8 @@ TARGETS = {
         "module": "imgsearch_gui",
         "requirements": "requirements-gui.txt",
         "sentinel": "PySide6",
+        # 「能 import」不等于「版本对」：还要按 requirements 里的区间校验
+        "pin": "PySide6",
         "label": "图形界面",
     },
 }
@@ -227,8 +229,122 @@ def pip(python: Path, *args: str) -> int:
     return subprocess.run([str(python), "-m", "pip", *args]).returncode
 
 
+def _requirement_bounds(requirements: Path, package: str) -> "tuple | None":
+    """
+    从 requirements 文件里读出某个包的版本区间 ``(最低, 最高不含)``。
+
+    只支持 ``PySide6>=6.6.0,<6.12`` 这种简单写法 —— 够用且不用引入
+    ``packaging`` 依赖。读不到就返回 None（不做判断，别拦着用户）。
+    """
+    try:
+        text = requirements.read_text(encoding="utf-8")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        line = line.split("#", 1)[0].strip()
+        if not line.lower().startswith(package.lower()):
+            continue
+        low = high = None
+        for part in line[len(package):].split(","):
+            part = part.strip()
+            if part.startswith(">="):
+                low = _version_tuple(part[2:])
+            elif part.startswith("<="):
+                high = _version_tuple(part[2:], exclusive=False)
+            elif part.startswith("<") and not part.startswith("<="):
+                high = _version_tuple(part[1:])
+        return (low, high)
+    return None
+
+
+def _version_tuple(text: str, exclusive: bool = True) -> "tuple":
+    """
+    把 "6.12" 变成 (6, 12)。
+
+    每一段只取**开头**的数字：``6.12.0rc1`` → (6, 12, 0)（而不是 1 ——
+    那是把所有数字拼起来的结果），``6.12.1`` → (6, 12, 1)。
+    """
+    parts = []
+    for chunk in text.strip().split("."):
+        digits = ""
+        for ch in chunk:
+            if not ch.isdigit():
+                break
+            digits += ch
+        if not digits:
+            break
+        parts.append(int(digits))
+    return tuple(parts)
+
+
+def installed_version(python: Path, module: str) -> "tuple | None":
+    """问 venv：这个模块装的是哪个版本"""
+    try:
+        out = subprocess.run(
+            [str(python), "-c", f"import {module}; print({module}.__version__)"],
+            stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, timeout=60,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if out.returncode != 0 or not out.stdout.strip():
+        return None
+    return _version_tuple(out.stdout.strip().splitlines()[-1])
+
+
+def check_version_pin(python: Path, spec: dict) -> None:
+    """
+    「能 import」不代表「版本对」。
+
+    实测教训：Windows 上 venv 里装过 PySide6 6.12.0，而 6.12 会让进程在退出时
+    崩溃（0xC0000409）。但 ``ensure_dependencies`` 只看 ``import PySide6``
+    是否成功，于是这个不合适的版本会**一直被复用**，症状看起来像"程序自己的 bug"。
+
+    这里按 requirements 里写的区间校验；不合规就明确提示怎么换回去。
+    """
+    name = spec.get("pin")
+    if not name:
+        return
+    bounds = _requirement_bounds(REPO_DIR / spec["requirements"], name)
+    if not bounds:
+        return
+    low, high = bounds
+    current = installed_version(python, name)
+    if current is None:
+        return
+
+    too_low = low is not None and current < low
+    too_high = high is not None and current >= high
+    if not (too_low or too_high):
+        return
+
+    want = f"（最低 {'.'.join(map(str, low))}）" if low else ""
+    cap = f"（上限不含 {'.'.join(map(str, high))}）" if high else ""
+    log(f"⚠️ {name} 版本是 {'.'.join(map(str, current))}，不在 "
+        f"{spec['requirements']} 要求的范围内{want}{cap}。")
+    if too_high and name == "PySide6":
+        log("   已知 PySide6 6.12.0 会让程序在退出时崩溃"
+            "（用例全过，退出码 0xC0000409）。")
+    log("   修复办法（二选一，都可以照抄）：")
+    log(f"     · 让它自己修：删除 {VENV_DIR} 后重新运行本脚本（.venv 只含依赖，"
+        "删掉不丢数据）")
+    log(f"     · 手动改：{python} -m pip install "
+        f"\"{name}{_bounds_text(low, high)}\"")
+    sys.exit(2)
+
+
+def _bounds_text(low, high) -> str:
+    """把区间还原成 pip 能懂的写法"""
+    chunks = []
+    if low:
+        chunks.append(">=" + ".".join(map(str, low)))
+    if high:
+        chunks.append("<" + ".".join(map(str, high)))
+    return ",".join(chunks)
+
+
 def ensure_dependencies(python: Path, spec: dict) -> None:
     if has_module(python, spec["sentinel"]):
+        check_version_pin(python, spec)
         return
 
     log(f"正在安装{spec['label']}依赖（{spec['requirements']}）…首次约需 1–3 分钟")

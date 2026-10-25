@@ -311,3 +311,65 @@ class TestPythonVersionGuard:
         """POSIX 没有 py 启动器，不该去猜 —— 直接返回 None"""
         monkeypatch.setattr(bootstrap, "IS_WINDOWS", False)
         assert bootstrap.find_newer_python() is None
+
+
+class TestVersionPin:
+    """
+    「能 import」不等于「版本对」。
+
+    实测教训：Windows 上 venv 里装过 PySide6 6.12.0，而 6.12 会让进程在退出时
+    崩溃（0xC0000409）；但 bootstrap 只看 import 是否成功，于是不合适的版本
+    被一直复用，症状看起来像"程序自己的 bug"。
+    """
+
+    def test_reads_bounds_from_requirements(self, tmp_path):
+        import bootstrap
+
+        req = tmp_path / "requirements-gui.txt"
+        req.write_text("PySide6>=6.6.0,<6.12\n", encoding="utf-8")
+        low, high = bootstrap._requirement_bounds(req, "PySide6")
+        assert low == (6, 6, 0)
+        assert high == (6, 12)
+
+    def test_ignores_comments_and_other_packages(self, tmp_path):
+        import bootstrap
+
+        req = tmp_path / "r.txt"
+        req.write_text(
+            "# 注释\n"
+            "-r requirements.txt\n"
+            "PySide6>=6.6,<6.12  # 6.12 会崩\n", encoding="utf-8")
+        low, high = bootstrap._requirement_bounds(req, "PySide6")
+        assert low == (6, 6)
+        assert high == (6, 12)
+
+    def test_missing_file_returns_none(self, tmp_path):
+        import bootstrap
+        assert bootstrap._requirement_bounds(tmp_path / "nope.txt", "PySide6") is None
+
+    def test_version_tuple_handles_prerelease(self):
+        import bootstrap
+        assert bootstrap._version_tuple("6.12.0rc1") == (6, 12, 0)
+        assert bootstrap._version_tuple("6.12") == (6, 12)
+
+    def test_612_is_rejected_611_is_fine(self, tmp_path, monkeypatch):
+        """6.12.0 必须被拦下并给出可照抄的修法；6.11.2 放行"""
+        import bootstrap
+
+        req = tmp_path / "requirements-gui.txt"
+        req.write_text("PySide6>=6.6.0,<6.12\n", encoding="utf-8")
+        monkeypatch.setattr(bootstrap, "REPO_DIR", tmp_path)
+        spec = {"requirements": req.name, "pin": "PySide6", "label": "图形界面"}
+
+        monkeypatch.setattr(bootstrap, "installed_version", lambda p, m: (6, 11, 2))
+        bootstrap.check_version_pin(None, spec)          # 不抛
+
+        monkeypatch.setattr(bootstrap, "installed_version", lambda p, m: (6, 12, 0))
+        import pytest
+        with pytest.raises(SystemExit) as exc:
+            bootstrap.check_version_pin(None, spec)
+        assert exc.value.code == 2
+
+    def test_bounds_text_is_pip_syntax(self):
+        import bootstrap
+        assert bootstrap._bounds_text((6, 6, 0), (6, 12)) == ">=6.6.0,<6.12"
