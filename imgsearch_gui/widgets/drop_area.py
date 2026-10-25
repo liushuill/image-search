@@ -44,10 +44,15 @@ class DropArea(QtWidgets.QFrame):
         self._title = QtWidgets.QLabel("把图片拖到这里")
         self._title.setObjectName("DropTitle")
         self._title.setAlignment(QtCore.Qt.AlignCenter)
+        # ⚠️ 必须允许换行：窗口左栏宽度有限，而 150% 缩放下这两行文本比
+        #    虚线框还宽。QLabel 默认是**裁掉**多出来的部分（不是省略号），
+        #    实机表现为「拖图片拖到这里」——首字被切掉，看着像 bug。
+        self._title.setWordWrap(True)
 
         self._hint = QtWidgets.QLabel("或点击选择文件　·　支持 jpg / png / webp / bmp / gif / tiff")
         self._hint.setObjectName("DropHint")
         self._hint.setAlignment(QtCore.Qt.AlignCenter)
+        self._hint.setWordWrap(True)
 
         lay.addWidget(self._title)
         lay.addWidget(self._hint)

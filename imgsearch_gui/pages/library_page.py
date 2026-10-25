@@ -180,7 +180,7 @@ class LibraryPage(QtWidgets.QWidget):
         hint = QtWidgets.QLabel(
             "图库以内容（dHash）识别图片，路径只是「最后已知位置」。"
             "因此文件在不同目录之间移动后，仍能认出「这张搜过了」并复用缓存结果。"
-            "路径之间**不允许嵌套** —— 否则同一张图会被记录两次。"
+            "路径之间不允许嵌套 —— 否则同一张图会被记录两次。"
         )
         hint.setObjectName("PageHint")
         hint.setWordWrap(True)
@@ -411,7 +411,7 @@ class LibraryPage(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(
             self, "已重新指定",
             f"路径已指向：\n{new_path}\n\n"
-            f"顺带改写了 {updated} 条记录的路径，**无需重新扫描**。"
+            f"顺带改写了 {updated} 条记录的路径，无需重新扫描。"
         )
         self.reload()
 
@@ -506,7 +506,7 @@ class LibraryPage(QtWidgets.QWidget):
         QtWidgets.QMessageBox.information(
             self, "已刷新",
             f"重新检查完成：{missing} 条记录的文件已不在最后已知位置。\n\n"
-            "记录**没有**被删除 —— 仍可凭 dHash 命中缓存；"
+            "记录没有被删除 —— 仍可凭 dHash 命中缓存；"
             "若目录被改名/移动，用「重新指定位置」指过去即可。"
         )
         self.reload()
