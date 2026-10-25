@@ -128,6 +128,77 @@ class TestErrorReporting:
         assert "error 5" in err
 
 
+class TestNoShellSession:
+    """
+    回归：无桌面外壳的会话（低完整性/服务/容器）里打开**文件夹**
+
+    实测（Windows 11，S-1-16-4096，tasklist 里没有 explorer.exe）：
+    打开目录一律 error 5，而打开文件成功。更糟的是 `Popen(["explorer", 路径])`
+    会返回成功、随后 explorer 以 0xc0000142 立刻死掉 ——
+    若把它当成功，用户看到的是「点了没反应」。
+    """
+
+    def test_dir_without_shell_fails_with_explanation(self, tmp_path, monkeypatch):
+        # ⚠️ 这里**不能**把 os.name 改成 "nt"：pathlib.Path 的工厂会在调用时
+        #    按 os.name 选 WindowsPath，于是 Path("/tmp/...") 变成 WindowsPath、
+        #    is_dir() 直接 False —— 测的就不是想测的分支了。
+        monkeypatch.setattr(shell_open, "has_shell", lambda: False)
+        monkeypatch.setattr(
+            shell_open.QtGui.QDesktopServices, "openUrl",
+            lambda url: pytest.fail("没有 shell 时不该再去调 Qt，只会制造噪声"))
+
+        assert shell_open.open_dir(tmp_path) is False
+        err = shell_open.last_error()
+        assert "Explorer" in err and "文件夹" in err
+
+    def test_file_without_shell_still_tries_startfile(self, tmp_path, monkeypatch):
+        """文件走文件关联，不需要 shell —— 这条不能一并否掉"""
+        calls = []
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "has_shell", lambda: False)
+        monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
+
+        f = tmp_path / "a.png"
+        f.write_bytes(b"x")
+        assert shell_open.open_path(str(f)) is True
+        assert calls == [str(f)]
+
+    def test_explorer_is_never_used_without_shell(self, monkeypatch):
+        """无 shell 时绝不能调 explorer —— 它必然立刻死，属于假阳性来源"""
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "has_shell", lambda: False)
+        monkeypatch.setattr(
+            shell_open.subprocess, "Popen",
+            lambda *a, **k: pytest.fail("没有 shell 时不该调 explorer"))
+        shell_open._explorer_launch("C:/x", True)
+        assert "没有 Explorer" in shell_open.last_error()
+
+    def test_explorer_dying_immediately_is_a_failure(self, tmp_path, monkeypatch):
+        """explorer 立即以非 0 退出 = 没打开，不能报成功"""
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "has_shell", lambda: True)
+
+        class Proc:
+            returncode = 0xc0000142
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        monkeypatch.setattr(shell_open.subprocess, "Popen", lambda *a, **k: Proc())
+        assert shell_open._explorer_launch(str(tmp_path), True) is False
+        assert "立即退出" in shell_open.last_error()
+
+
+class TestShellContextInError:
+    def test_error_carries_shell_window_state(self, monkeypatch):
+        """失败信息要能自证环境：GetShellWindow=0 说明是无 shell 会话"""
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "has_shell", lambda: False)
+        monkeypatch.setattr(shell_open, "_shell_context", lambda: "（GetShellWindow=0，无桌面外壳）")
+        shell_open.open_path("C:/x")
+        assert "GetShellWindow=0" in shell_open.last_error()
+
+
 class TestOpenUrl:
     def test_uses_qt_with_raw_url(self, monkeypatch):
         opened = []
