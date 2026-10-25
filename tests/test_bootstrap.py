@@ -373,3 +373,47 @@ class TestVersionPin:
     def test_bounds_text_is_pip_syntax(self):
         import bootstrap
         assert bootstrap._bounds_text((6, 6, 0), (6, 12)) == ">=6.6.0,<6.12"
+
+
+class TestLowIntegrityWarning:
+    """
+    回归：venv 在低完整性（沙箱）会话里创建 → 该 venv 的 python 跑在 Low IL
+    → 打开文件夹一律 ShellExecute error 5、explorer 子进程 0xC0000142，
+    而测试/渲染/CLI 全正常 —— 极难看出原因。所以启动时要主动提示。
+    """
+
+    def _fake(self, monkeypatch, stdout, is_windows=True):
+        import bootstrap
+
+        class R:
+            pass
+
+        r = R()
+        r.stdout = stdout
+        monkeypatch.setattr(bootstrap, "IS_WINDOWS", is_windows)
+        monkeypatch.setattr(bootstrap.subprocess, "run", lambda *a, **k: r)
+        return bootstrap
+
+    def test_warns_on_low(self, monkeypatch, capsys):
+        b = self._fake(monkeypatch, "Mandatory Label\\Low  S-1-16-4096")
+        b.warn_if_low_integrity()
+        err = capsys.readouterr().err
+        assert "低完整性" in err and "VENV_DIR" not in err and ".venv" in err
+
+    def test_quiet_on_medium(self, monkeypatch, capsys):
+        b = self._fake(monkeypatch, "Mandatory Label\\Medium  S-1-16-8192")
+        b.warn_if_low_integrity()
+        assert "低完整性" not in capsys.readouterr().err
+
+    def test_quiet_on_posix(self, monkeypatch, capsys):
+        b = self._fake(monkeypatch, "S-1-16-4096", is_windows=False)
+        b.warn_if_low_integrity()
+        assert "低完整性" not in capsys.readouterr().err
+
+    def test_no_crash_when_whoami_missing(self, monkeypatch):
+        import bootstrap
+
+        monkeypatch.setattr(bootstrap, "IS_WINDOWS", True)
+        monkeypatch.setattr(bootstrap.subprocess, "run",
+                            lambda *a, **k: (_ for _ in ()).throw(OSError("no whoami")))
+        bootstrap.warn_if_low_integrity()      # 不应抛

@@ -345,6 +345,37 @@ def _bounds_text(low, high) -> str:
     return ",".join(chunks)
 
 
+def warn_if_low_integrity() -> None:
+    """
+    Windows：当前进程若跑在**低完整性**（沙箱/受限会话）里，给出明确警告。
+
+    为什么值得单列一条：实测遇到过一种极难查的情况 —— venv 是在低完整性会话
+    里创建的，`Scripts\\python.exe` 于是带上 Low 标签，之后用这个 venv 启动的
+    进程都跑在 Low 完整性下：
+
+    - 打开文件夹一律 `ShellExecute ... failed (error 5)`（UIPI 拒绝）
+    - `explorer` 子进程以 0xC0000142 起不来
+    - 但**测试、渲染、CLI 全都正常** —— 症状看起来像"代码有 bug"
+
+    这种 venv 无法靠改代码救回来，只能在普通终端里重建。
+    """
+    if not IS_WINDOWS:
+        return
+    try:
+        out = subprocess.run(["whoami", "/groups"], capture_output=True,
+                             text=True, timeout=5).stdout
+    except (OSError, subprocess.SubprocessError):
+        return
+    if "S-1-16-4096" not in out:
+        return
+    log("⚠️ 当前进程运行在低完整性（沙箱/受限会话）环境中。")
+    log("   在这种环境里创建出来的 .venv 会带上 Low 标签，之后：")
+    log("     · 打开文件夹一律失败（ShellExecute error 5）")
+    log("     · explorer 子进程起不来（0xC0000142）")
+    log("   而测试、渲染、CLI 都正常 —— 很难看出是这个原因。")
+    log(f"   建议：在普通终端里删除 {VENV_DIR} 后重新运行本脚本。")
+
+
 def ensure_dependencies(python: Path, spec: dict) -> None:
     if has_module(python, spec["sentinel"]):
         check_version_pin(python, spec)
@@ -380,6 +411,7 @@ def main(argv: list) -> int:
     # 否则一个 3.9 的解释器会一路走到「装依赖失败」，
     # 报出来的却是一个和版本毫无关系的错误（实机见过：源码编译卡死十分钟）。
     ensure_python_version(argv)
+    warn_if_low_integrity()
 
     if not argv or argv[0] not in TARGETS:
         print(__doc__)

@@ -10,25 +10,27 @@
 
 error 5 = 拒绝访问。Qt 把本地路径转成 `file://` URL 再交给 ShellExecute。
 
-⚠️ **一次误判的经过（2026-10，已澄清）**
+⚠️ **根因：在低完整性会话里创建的 venv（2026-10 实测）**
 
-曾出现打开文件夹报 ``ShellExecute ... failed (error 5)``，一度被归因为
-「Windows 上 ``os.startfile`` 对目录不可靠」甚至「这台机器没有桌面外壳」。
-在正常桌面会话（Medium 完整性、``explorer.exe`` 在跑）里实测后确认：
+现象：打开文件夹报 ``ShellExecute ... failed (error 5)``，同一台机器上换一个
+Python 就正常。排查到底发现根本不是 Python 版本的问题，而是：
 
-    GetShellWindow() = 3278634   （非 0，有外壳）
-    os.startfile(目录) → 成功
+    venv 是由**低完整性进程**（沙箱/受限会话）创建的
+    → venv/Scripts/python.exe 的文件 ACL 带 "Mandatory Label/Low"
+    → 用它启动的进程运行在 Low 完整性（S-1-16-4096）
+    → 低完整性进程不能向中完整性的 Explorer 发窗口消息（UIPI）
+    → ShellExecute 一律返回 5（拒绝访问）
+    → 连 `explorer` 子进程都以 0xC0000142（DLL 初始化失败）起不来
 
-**但真正的根因是 Python 版本**：同一台机器上，``os.startfile(目录)`` 在
-**3.9** 下成功，在 **3.14**（本程序 venv 用的）下失败 —— 3.14 给 startfile 加了
-``operation`` / ``arguments`` / ``show_cmd`` 参数，对目录的行为与旧版不同。
+对照实测（同一个 3.14.5）：
+- venv 里的 python：startfile 失败、ShellExecuteW 返回 5、explorer 0xC0000142
+- 同版本的 base 解释器：全部成功（ShellExecuteW 返回 42）
 
-所以现在：
-- **目录**走 Win32 ``ShellExecuteW``（:func:`_shell_execute`），不依赖 startfile，
-  且能看返回码（>32 成功）
-- **文件**仍用 ``os.startfile`` —— 走文件关联、不需要 shell，实测可用
-- 确认无桌面外壳（``GetShellWindow() == 0``）时给准确原因，不再刷一屏 error 5
-- explorer 的「启动成功但立刻退出」判定为失败 —— 那是「点了没反应」的来源
+**解法不是改代码，而是重建 venv**：在**普通终端**（Medium）里删掉 .venv
+重新运行 bootstrap。程序会在失败信息里带上进程完整性，便于一眼看出这种情况。
+
+结构上仍保留三级：``os.startfile`` → Win32 ``ShellExecuteW``（能拿返回码）
+→ ``explorer``（``/select,``），并探测 ``GetShellWindow()`` 判断有没有桌面外壳。
 """
 
 import os
@@ -154,15 +156,16 @@ def _explorer_launch(text: str, is_dir: bool) -> bool:
         proc = subprocess.Popen(args, close_fds=True)
     except OSError as exc:                              # pragma: no cover
         return _fail("explorer", exc)
-    # explorer 正常时会把请求交给已在运行的实例后**自己退出**（退出码常为 1），
-    # 所以不能靠退出码判断。这里只拦「立刻就死且退出码异常」的情况。
+    # explorer 正常时会把请求交给已在运行的实例，然后**自己退出**。
+    # 实测：成功时退出码是 **1**（不是 0），所以不能拿 ==0 判断成功。
+    # 真正失败的样子是 0xC0000142（DLL 初始化失败，低完整性会话里常见）。
     try:
-        code = proc.wait(timeout=0.6)
+        code = proc.wait(timeout=1.5)
     except subprocess.TimeoutExpired:
         return _ok()                    # 还在跑，认为已经交出去了
-    if code == 0:
+    if code in (0, 1):
         return _ok()
-    return _fail("explorer", OSError(f"explorer 立即退出，code={code}"))
+    return _fail("explorer", OSError(f"explorer 立即退出，code={code:#x}"))
 
 
 def open_path(target) -> bool:
@@ -184,27 +187,25 @@ def open_path(target) -> bool:
     if os.name == "nt":
         tried = True
 
+        # 第一级：os.startfile（文件和目录在**正常进程**里都好用）
+        try:
+            os.startfile(text)              # type: ignore[attr-defined]
+            return _ok()
+        except (OSError, AttributeError) as exc:
+            _fail("os.startfile", exc)
+
+        # 第二级：直接调 Win32（os.startfile 内部也是它，但这里能拿到返回码）
+        if _shell_execute(text):
+            return _ok()
+
+        # 第三级：目录还能试试直接拉资源管理器
         if is_dir:
-            # 目录：直接用 Win32 API，避开 3.14 上行为不同的 os.startfile
-            if _shell_execute(text):
-                return True
-            # 确认没有 shell → 后面两级必然失败（都要请 Explorer 代劳），
-            # 直接给准确原因，别让用户在控制台看一串 error 5。
             if not has_shell():
                 _fail("open_path", OSError(
                     "当前会话没有 Explorer 桌面外壳（低完整性/无桌面会话），"
                     "无法打开文件夹；文件仍然可以直接打开"))
                 return False
             if _explorer_launch(text, True):
-                return True
-        else:
-            # 文件：os.startfile 走文件关联、不需要 shell，实测可用
-            try:
-                os.startfile(text)          # type: ignore[attr-defined]
-                return _ok()
-            except (OSError, AttributeError) as exc:
-                _fail("os.startfile", exc)
-            if _shell_execute(text):
                 return True
 
     if QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(text)):

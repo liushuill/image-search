@@ -89,26 +89,24 @@ run.bat engines list
 **开发原先在 Linux 上完成；2026-10 在一台 Windows 11（Python 3.14.5 / PySide6 6.11.2）
 上跑过一轮。** 下面把「实测通过」与「没覆盖」分开列，避免"应该没问题"这种含糊说法。
 
-> ⚠️ **关于「打开文件夹」的一次误判（已澄清）**
+> ⚠️ **「打开文件夹」失败的真实原因：venv 建在了沙箱里**
 >
-> 曾经出现过 `ShellExecute ... failed (error 5)`，一度被归因为「Windows 上打开目录
-> 不可靠」甚至「这台机器没有桌面外壳」。后来在**正常桌面会话**（Medium 完整性、
-> `explorer.exe` 在跑）里实测：
+> 曾经出现过 `ShellExecute ... failed (error 5)`，排查过程走了两个弯路
+> （先怀疑 `os.startfile` 不可靠，又怀疑 Python 3.14 改了实现）。最后实测定位到：
 >
 > ```
-> GetShellWindow() = 3278634   （非 0 = 有桌面外壳）
-> os.startfile(输出目录) → 成功打开
+> venv 是在低完整性会话（沙箱）里创建的
+>   → .venv\Scripts\python.exe 的 ACL 带 "Mandatory Label/Low"
+>   → 用它启动的进程运行在 Low 完整性（S-1-16-4096）
+>   → Low 进程不能向中完整性的 Explorer 发窗口消息（UIPI）
+>   → ShellExecute 一律返回 5；连 explorer 子进程都以 0xC0000142 起不来
 > ```
 >
-> 但后续在**同一台机器的 cmd** 里复现了：`os.startfile(目录)` 用 **Python 3.9**
-> 成功，而程序（venv 里的 **3.14**）失败。原因是 3.14 给 `os.startfile` 加了
-> `operation` / `arguments` / `show_cmd` 参数，实现对**目录**的行为与旧版不同。
+> 对照实验（同一个 3.14.5）：venv 里的 python 全失败，**base 解释器全成功**。
+> 所以**不是代码问题、不是版本问题** —— 在普通终端里删掉 `.venv` 重建即可。
 >
-> 现在 Windows 下打开**目录**改走 Win32 `ShellExecuteW`（`os.startfile` 内部
-> 就是调它，但我们能拿到返回码判断成败），**不再依赖 `os.startfile`**；
-> 打开**文件**仍用 `os.startfile`（文件关联不需要 shell，实测可用）。
-> 另外会探测 `GetShellWindow()`：确认没有桌面外壳时给出准确原因，
-> 而不是三样东西各失败一次、刷一屏噪声。
+> 程序现在会在两处给出提示：启动时若检测到低完整性会话会警告；
+> 「打不开」的弹窗里带 `进程完整性=Low` 这样的线索，一眼可辨。
 
 **在「无 shell 会话」里也依然有效的结论**
 

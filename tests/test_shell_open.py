@@ -193,8 +193,26 @@ class TestNoShellSession:
         shell_open._explorer_launch("C:/x", True)
         assert "没有 Explorer" in shell_open.last_error()
 
+    def test_explorer_exit_code_1_counts_as_success(self, monkeypatch):
+        """
+        实测：explorer 成功打开文件夹时退出码是 **1**（把请求交给已有实例后自己退出）。
+        所以不能拿 ==0 判断成功，否则正常工作也会被报成失败。
+        """
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "has_shell", lambda: True)
+
+        class Proc:
+            returncode = 1
+
+            def wait(self, timeout=None):
+                return self.returncode
+
+        monkeypatch.setattr(shell_open.subprocess, "Popen", lambda *a, **k: Proc())
+        assert shell_open._explorer_launch("C:/x", True) is True
+        assert shell_open.last_error() == ""
+
     def test_explorer_dying_immediately_is_a_failure(self, tmp_path, monkeypatch):
-        """explorer 立即以非 0 退出 = 没打开，不能报成功"""
+        """0xC0000142 这种 DLL 初始化失败才算真失败"""
         monkeypatch.setattr(os, "name", "nt")
         monkeypatch.setattr(shell_open, "has_shell", lambda: True)
 
