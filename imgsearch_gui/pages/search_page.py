@@ -312,4 +312,5 @@ class SearchPage(QtWidgets.QWidget):
         for row in sorted(rows):
             item = self.table.item(row, 6)
             if item and item.text():
-                QtGui.QDesktopServices.openUrl(QtCore.QUrl(item.text()))
+                from imgsearch_gui.shell_open import open_url
+                open_url(item.text())

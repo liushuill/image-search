@@ -203,7 +203,8 @@ class ResultTable(QtWidgets.QTableWidget):
     def _open_current(self, index: QtCore.QModelIndex) -> None:
         url = self.item(index.row(), COL_URL).text()
         if url:
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+            from imgsearch_gui.shell_open import open_url
+            open_url(url)
 
     def contextMenuEvent(self, event: QtGui.QContextMenuEvent) -> None:
         item = self.itemAt(event.pos())
@@ -218,7 +219,8 @@ class ResultTable(QtWidgets.QTableWidget):
         if chosen is act_open:
             url = self.item(row, COL_URL).text()
             if url:
-                QtGui.QDesktopServices.openUrl(QtCore.QUrl(url))
+                from imgsearch_gui.shell_open import open_url
+            open_url(url)
         elif chosen is act_copy_url:
             QtWidgets.QApplication.clipboard().setText(self.item(row, COL_URL).text())
         elif chosen is act_copy_row:

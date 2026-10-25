@@ -15,11 +15,12 @@
 import os
 from pathlib import Path
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtCore, QtWidgets
 
 from imgsearch import secrets
 from imgsearch.service import declared_secrets
 from imgsearch_gui import style
+from imgsearch_gui.shell_open import open_url
 
 # 已知凭据的友好文案与获取入口（其余由引擎 schema 的 help 兜底）
 # ⚠️ 这里**只放界面专属的信息**（获取地址）——名称、说明、是否必填
@@ -121,9 +122,7 @@ class CredentialRow(QtWidgets.QFrame):
         if link:
             open_btn = QtWidgets.QPushButton("获取")
             open_btn.setToolTip(link)
-            open_btn.clicked.connect(
-                lambda: QtGui.QDesktopServices.openUrl(QtCore.QUrl(link))
-            )
+            open_btn.clicked.connect(lambda: open_url(link))
             row.addWidget(open_btn)
 
         lay.addLayout(row)
@@ -334,9 +333,11 @@ class CredentialsPage(QtWidgets.QWidget):
         self.saved.emit()
 
     def _reveal(self) -> None:
+        from imgsearch_gui.shell_open import open_dir
+
         path = Path(secrets.ENV_FILE)
         target = path.parent if path.parent.is_dir() else Path.home()
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(str(target)))
+        open_dir(target)
 
     def showEvent(self, event) -> None:          # noqa: D102
         super().showEvent(event)

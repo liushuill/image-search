@@ -8,7 +8,7 @@
 
 from pathlib import Path
 
-from PySide6 import QtCore, QtGui, QtWidgets
+from PySide6 import QtWidgets
 
 from imgsearch.config import OUTPUT_DIR, get, save_config
 from imgsearch.exporters import (
@@ -154,9 +154,14 @@ class ExportDialog(QtWidgets.QDialog):
             self.outdir_edit.setText(chosen)
 
     def _open_outdir(self) -> None:
+        # ⚠️ 必须走 shell_open：Windows 上用 file:// URL 打开目录
+        # 会 ShellExecute 失败（error 5），os.startfile 才可靠
+        from imgsearch_gui.shell_open import open_dir
+
         target = self.outdir_edit.text().strip() or str(OUTPUT_DIR)
-        if Path(target).is_dir():
-            QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(target))
+        if not open_dir(target):
+            QtWidgets.QMessageBox.information(
+                self, "打不开目录", f"目录不存在或无法打开：\n{target}")
 
     def _remember(self) -> None:
         save_config("export_formats", self.selected_formats())

@@ -496,8 +496,10 @@ class LibraryPage(QtWidgets.QWidget):
         root = self._selected_root()
         if root is None:
             return
+        from imgsearch_gui.shell_open import open_dir
+
         target = root.path if root.exists else str(QtCore.QDir.home())
-        QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(target))
+        open_dir(target)
 
     def _refresh_files(self) -> None:
         missing = self._with_library(

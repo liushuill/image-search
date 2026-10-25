@@ -246,16 +246,18 @@ class LibraryBrowserPage(QtWidgets.QWidget):
         return chosen
 
     def _open_selected(self) -> None:
+        from imgsearch_gui.shell_open import open_path
+
         for path in self._selected_records():
             if Path(path).is_file():
-                QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(path))
+                open_path(path)
 
     def _open_dir(self) -> None:
         for path in self._selected_records():
             parent = Path(path).parent
             if parent.is_dir():
-                QtGui.QDesktopServices.openUrl(
-                    QtCore.QUrl.fromLocalFile(str(parent)))
+                from imgsearch_gui.shell_open import open_dir
+                open_dir(parent)
                 return
 
     def _menu(self, pos) -> None:
