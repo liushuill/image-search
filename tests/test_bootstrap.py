@@ -57,6 +57,43 @@ class TestVenvLayout:
         # 已存在时不该再去创建
         assert bootstrap.ensure_venv() == target
 
+    def test_reads_version_from_pyvenv_cfg(self, tmp_path):
+        (tmp_path / "pyvenv.cfg").write_text(
+            "home = /usr/bin\nversion = 3.11.9\n", encoding="utf-8"
+        )
+        assert bootstrap.venv_version(tmp_path) == (3, 11)
+
+    def test_pyvenv_cfg_with_bom_is_parsed(self, tmp_path):
+        """带 BOM 时第一行的键会变成 '\\ufeffversion'，不处理就「读不到」"""
+        (tmp_path / "pyvenv.cfg").write_bytes(b"\xef\xbb\xbfversion = 3.12.1\n")
+        assert bootstrap.venv_version(tmp_path) == (3, 12)
+
+    def test_missing_pyvenv_cfg_is_not_an_error(self, tmp_path):
+        """取不到版本就不判断 —— 不能因为读不到文件就拒绝启动"""
+        assert bootstrap.venv_version(tmp_path) is None
+
+    def test_stale_venv_is_refused_with_instructions(self, tmp_path, monkeypatch, capsys):
+        """
+        旧解释器建的 venv 会被一直复用，症状是「和版本毫无关系的 ImportError」。
+
+        实测来源：修好 `py -3` 之前跑过一次的机器，`.venv` 是 3.9 建的，
+        之后即使解释器换对了也还是拿那个坏 venv 去跑。
+        """
+        monkeypatch.setattr(bootstrap, "IS_WINDOWS", False)
+        monkeypatch.setattr(bootstrap, "VENV_DIR", tmp_path / ".venv")
+        (tmp_path / ".venv" / "bin").mkdir(parents=True)
+        (tmp_path / ".venv" / "bin" / "python").write_text("", encoding="utf-8")
+        (tmp_path / ".venv" / "pyvenv.cfg").write_text(
+            "version = 3.9.10\n", encoding="utf-8"
+        )
+
+        with pytest.raises(SystemExit) as exc:
+            bootstrap.ensure_venv()
+
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "3.9" in err and "删除" in err
+
     def test_failure_explains_how_to_fix(self, tmp_path, monkeypatch, capsys):
         monkeypatch.setattr(bootstrap, "VENV_DIR", tmp_path / "nope")
         monkeypatch.setattr(bootstrap, "venv_python",
@@ -195,3 +232,82 @@ class TestLaunchers:
         for name in ("run.sh", "run-gui.sh"):
             text = (bootstrap.REPO_DIR / name).read_text(encoding="utf-8")
             assert "python3" in text and "找不到 Python" in text
+
+
+class TestPythonVersionGuard:
+    """
+    解释器太旧时必须**立刻**说清楚，而不是等到装依赖失败。
+
+    实机复现（Windows，2026-10）：机器上装着 3.9 与 3.14，但 ``py -3``
+    解析到 3.9 —— `run.bat` 拿 3.9 建 venv，`pip install` 找不到轮子后
+    退回源码编译，十几分钟没有输出，看起来完全像卡死。
+    """
+
+    def test_min_python_matches_pyproject(self):
+        """两处声明同一件事，改一处漏一处就会自相矛盾"""
+        import re
+
+        text = (bootstrap.REPO_DIR / "pyproject.toml").read_text(encoding="utf-8")
+        found = re.search(r'requires-python\s*=\s*">=\s*(\d+)\.(\d+)"', text)
+        assert found, "pyproject 里找不到 requires-python"
+        assert (int(found.group(1)), int(found.group(2))) == bootstrap.MIN_PYTHON
+
+    def test_current_interpreter_passes_the_guard(self):
+        """测试本身就要求 3.10+，所以这里不该判成「太旧」"""
+        assert bootstrap._too_old() is False
+
+    def test_too_old_without_alternative_exits_with_instructions(self, monkeypatch, capsys):
+        monkeypatch.setattr(bootstrap, "_too_old", lambda: True)
+        monkeypatch.setattr(bootstrap, "find_newer_python", lambda: None)
+        monkeypatch.delenv(bootstrap._REEXEC_FLAG, raising=False)
+
+        with pytest.raises(SystemExit) as exc:
+            bootstrap.main(["cli"])
+
+        assert exc.value.code == 2
+        err = capsys.readouterr().err
+        assert "3.10" in err
+        assert "当前解释器" in err
+        # 必须给出可照抄的命令，而不是「请升级 Python」这种空话
+        assert "py -3.14" in err or "apt install" in err
+
+    def test_too_old_with_newer_interpreter_reexecs(self, monkeypatch):
+        """Windows 上能换就换：换过去重跑自己，用户什么都不用做"""
+        recorded = {}
+
+        monkeypatch.setattr(bootstrap, "_too_old", lambda: True)
+        monkeypatch.setattr(bootstrap, "find_newer_python", lambda: "/fake/python3.14")
+        monkeypatch.delenv(bootstrap._REEXEC_FLAG, raising=False)
+
+        def fake_run(cmd, **kwargs):
+            recorded["cmd"] = cmd
+            recorded["env"] = kwargs.get("env") or {}
+            return type("R", (), {"returncode": 0})()
+
+        monkeypatch.setattr(bootstrap.subprocess, "run", fake_run)
+
+        with pytest.raises(SystemExit) as exc:
+            bootstrap.main(["gui"])
+
+        assert exc.value.code == 0
+        assert recorded["cmd"][0] == "/fake/python3.14"
+        assert recorded["cmd"][1].endswith("bootstrap.py")
+        assert recorded["cmd"][2:] == ["gui"]
+        # 标记必须传下去，否则新旧解释器之间会无限套娃
+        assert recorded["env"][bootstrap._REEXEC_FLAG] == "1"
+
+    def test_reexec_flag_prevents_infinite_loop(self, monkeypatch, capsys):
+        monkeypatch.setattr(bootstrap, "_too_old", lambda: True)
+        monkeypatch.setenv(bootstrap._REEXEC_FLAG, "1")
+        # 即使还能找到一个更新的解释器，也不能再换
+        monkeypatch.setattr(bootstrap, "find_newer_python", lambda: "/fake/python3.14")
+
+        with pytest.raises(SystemExit) as exc:
+            bootstrap.main(["cli"])
+
+        assert exc.value.code == 2
+
+    def test_no_launcher_probing_on_posix(self, monkeypatch):
+        """POSIX 没有 py 启动器，不该去猜 —— 直接返回 None"""
+        monkeypatch.setattr(bootstrap, "IS_WINDOWS", False)
+        assert bootstrap.find_newer_python() is None
