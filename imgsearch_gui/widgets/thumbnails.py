@@ -280,11 +280,23 @@ class ThumbnailLoader(QtCore.QObject):
             return
         self.ready.emit(key, pixmap)
 
-    def stop(self) -> None:
-        """停止后台线程；可重复调用，没起过线程时是空操作"""
+    def stop(self, wait_ms: int = 1500) -> None:
+        """
+        停止后台线程；可重复调用，没起过线程时是空操作。
+
+        ⚠️ 光 wait 不够：线程可能正卡在缩略图下载里（超时 8 秒，
+        走代理时 15 秒），3 秒等不到它退出。而 QThread 还在跑就被销毁时，
+        Qt 会 **abort 整个进程**（exit 134 + 核心转储）。
+        所以等到超时后直接 terminate —— 这个线程只碰 queue 和一个 socket，
+        在「进程即将退出」这个前提下，强杀比 abort 安全得多。
+        """
         if self._stopped:
             return
         self._stopped = True
-        if self._worker is not None:
-            self._worker.stop()
-            self._worker.wait(3000)
+        if self._worker is None:
+            return
+        self._worker.stop()
+        if self._worker.wait(wait_ms):
+            return
+        self._worker.terminate()        # 卡在 socket 里，只能强杀
+        self._worker.wait(1000)

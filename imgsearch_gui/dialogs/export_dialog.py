@@ -156,12 +156,15 @@ class ExportDialog(QtWidgets.QDialog):
     def _open_outdir(self) -> None:
         # ⚠️ 必须走 shell_open：Windows 上用 file:// URL 打开目录
         # 会 ShellExecute 失败（error 5），os.startfile 才可靠
-        from imgsearch_gui.shell_open import open_dir
+        from imgsearch_gui import shell_open
 
         target = self.outdir_edit.text().strip() or str(OUTPUT_DIR)
-        if not open_dir(target):
+        if not shell_open.open_dir(target):
+            # 把失败原因一起显示：只说「打不开」，用户和开发者都无从下手
+            reason = shell_open.last_error() or "未知原因"
             QtWidgets.QMessageBox.information(
-                self, "打不开目录", f"目录不存在或无法打开：\n{target}")
+                self, "打不开目录",
+                f"无法打开：\n{target}\n\n原因：\n{reason}")
 
     def _remember(self) -> None:
         save_config("export_formats", self.selected_formats())

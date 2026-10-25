@@ -13,6 +13,8 @@ Windows 的原生做法是 ``os.startfile(原生路径)``。
 import os
 from pathlib import Path
 
+import pytest
+
 
 from imgsearch_gui import shell_open
 
@@ -35,11 +37,34 @@ class TestOpenPath:
             raise OSError("no handler")
 
         monkeypatch.setattr(os, "startfile", boom, raising=False)
+        monkeypatch.setattr(shell_open, "_explorer_launch", lambda *a: False)
         monkeypatch.setattr(
             shell_open.QtGui.QDesktopServices, "openUrl",
             lambda url: opened.append(url.toString()) or True)
         assert shell_open.open_path("C:/x") is True
         assert opened, "应当退回 Qt"
+
+    def test_windows_tries_explorer_between_startfile_and_qt(self, monkeypatch):
+        """
+        实测有机器连 os.startfile 都返回 error 5，但 explorer 能打开。
+        所以中间必须夹一层 explorer，且成功时不再走 Qt。
+        """
+        calls = []
+        monkeypatch.setattr(os, "name", "nt")
+
+        def boom(path):
+            raise OSError("error 5")
+
+        monkeypatch.setattr(os, "startfile", boom, raising=False)
+        monkeypatch.setattr(
+            shell_open, "_explorer_launch",
+            lambda text, is_dir: calls.append((text, is_dir)) or True)
+        monkeypatch.setattr(
+            shell_open.QtGui.QDesktopServices, "openUrl",
+            lambda url: pytest.fail("explorer 成功时不该再走 Qt"))
+
+        assert shell_open.open_path(r"C:\Users\a\output") is True
+        assert calls == [(r"C:\Users\a\output", False)]
 
     def test_posix_uses_qt(self, monkeypatch):
         opened = []
@@ -60,6 +85,11 @@ class TestOpenDir:
         """目录不存在时静默返回 False，而不是弹一个看不懂的系统错误"""
         assert shell_open.open_dir(tmp_path / "nope") is False
 
+    def test_missing_dir_records_reason(self, tmp_path):
+        """失败原因要能取到 —— 界面直接显示它，而不是只说「打不开」"""
+        shell_open.open_dir(tmp_path / "nope")
+        assert "目录不存在" in shell_open.last_error()
+
     def test_existing_dir_is_opened(self, tmp_path, monkeypatch):
         opened = []
         monkeypatch.setattr(os, "name", "posix")
@@ -68,6 +98,34 @@ class TestOpenDir:
             lambda url: opened.append(url) or True)
         assert shell_open.open_dir(tmp_path) is True
         assert opened
+
+
+class TestErrorReporting:
+    def test_success_clears_last_error(self, tmp_path, monkeypatch):
+        shell_open.open_dir(tmp_path / "nope")           # 先制造一次失败
+        assert shell_open.last_error()
+        monkeypatch.setattr(os, "name", "posix")
+        monkeypatch.setattr(
+            shell_open.QtGui.QDesktopServices, "openUrl", lambda url: True)
+        assert shell_open.open_dir(tmp_path) is True
+        assert shell_open.last_error() == ""
+
+    def test_all_methods_failing_reports_each_step(self, monkeypatch):
+        """每一级的失败原因都要留下来，否则没法判断到底卡在哪"""
+        monkeypatch.setattr(os, "name", "nt")
+
+        def boom(path):
+            raise OSError("error 5")
+
+        monkeypatch.setattr(os, "startfile", boom, raising=False)
+        monkeypatch.setattr(shell_open, "_explorer_launch", lambda *a: False)
+        monkeypatch.setattr(
+            shell_open.QtGui.QDesktopServices, "openUrl", lambda url: False)
+
+        assert shell_open.open_path("C:/x") is False
+        err = shell_open.last_error()
+        assert "os.startfile" in err
+        assert "error 5" in err
 
 
 class TestOpenUrl:
