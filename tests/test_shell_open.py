@@ -20,14 +20,32 @@ from imgsearch_gui import shell_open
 
 
 class TestOpenPath:
-    def test_windows_uses_startfile_with_native_path(self, monkeypatch):
-        """Windows 上必须传**原生路径**，不能是 file:// URL —— 这正是 bug 的成因"""
+    def test_windows_dir_uses_shell_execute_with_native_path(self, monkeypatch):
+        """
+        目录走 Win32 ShellExecuteW，且必须传**原生路径**（不是 file:// URL）。
+
+        为什么不走 os.startfile：实测同机 Python 3.9 成功、3.14 失败。
+        """
         calls = []
         monkeypatch.setattr(os, "name", "nt")
-        monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
+        monkeypatch.setattr(shell_open, "_shell_execute",
+                            lambda text: calls.append(text) or True)
 
         assert shell_open.open_path(r"C:\Users\a\output") is True
         assert calls == [r"C:\Users\a\output"]
+
+    def test_windows_file_uses_startfile(self, tmp_path, monkeypatch):
+        """文件仍走 os.startfile（文件关联不需要 shell，实测可用）"""
+        import pathlib as _pl
+        calls = []
+        monkeypatch.setattr(os, "name", "nt")
+        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(os, "startfile", lambda p: calls.append(p), raising=False)
+
+        f = tmp_path / "a.png"
+        f.write_bytes(b"x")
+        assert shell_open.open_path(str(f)) is True
+        assert calls == [str(f)]
 
     def test_windows_falls_back_to_qt_on_error(self, monkeypatch):
         opened = []
@@ -44,18 +62,14 @@ class TestOpenPath:
         assert shell_open.open_path("C:/x") is True
         assert opened, "应当退回 Qt"
 
-    def test_windows_tries_explorer_between_startfile_and_qt(self, monkeypatch):
-        """
-        实测有机器连 os.startfile 都返回 error 5，但 explorer 能打开。
-        所以中间必须夹一层 explorer，且成功时不再走 Qt。
-        """
+    def test_windows_dir_falls_back_to_explorer(self, tmp_path, monkeypatch):
+        """ShellExecuteW 失败 → 用 explorer 打开目录；成功时不再走 Qt"""
+        import pathlib as _pl
         calls = []
         monkeypatch.setattr(os, "name", "nt")
-
-        def boom(path):
-            raise OSError("error 5")
-
-        monkeypatch.setattr(os, "startfile", boom, raising=False)
+        monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
+        monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
+        monkeypatch.setattr(shell_open, "has_shell", lambda: True)
         monkeypatch.setattr(
             shell_open, "_explorer_launch",
             lambda text, is_dir: calls.append((text, is_dir)) or True)
@@ -63,8 +77,8 @@ class TestOpenPath:
             shell_open.QtGui.QDesktopServices, "openUrl",
             lambda url: pytest.fail("explorer 成功时不该再走 Qt"))
 
-        assert shell_open.open_path(r"C:\Users\a\output") is True
-        assert calls == [(r"C:\Users\a\output", False)]
+        assert shell_open.open_dir(tmp_path) is True
+        assert calls and calls[0][1] is True
 
     def test_posix_uses_qt(self, monkeypatch):
         opened = []
@@ -145,9 +159,7 @@ class TestNoShellSession:
         import pathlib as _pl
         monkeypatch.setattr(os, "name", "nt")
         monkeypatch.setattr(shell_open, "Path", _pl.PosixPath)
-        monkeypatch.setattr(os, "startfile",
-                            lambda p: (_ for _ in ()).throw(OSError("error 5")),
-                            raising=False)
+        monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
         monkeypatch.setattr(
             shell_open.QtGui.QDesktopServices, "openUrl",

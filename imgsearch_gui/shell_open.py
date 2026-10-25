@@ -19,13 +19,15 @@ error 5 = 拒绝访问。Qt 把本地路径转成 `file://` URL 再交给 ShellE
     GetShellWindow() = 3278634   （非 0，有外壳）
     os.startfile(目录) → 成功
 
-**代码没问题，桌面下能正常打开。** 当初的失败是因为程序从**无桌面外壳的
-沙箱会话**里启动（低完整性）：打开文件夹必须请 Explorer 代劳，没有它就会被
-UIPI 拒绝；而打开文件走文件关联、直接起子进程，所以同一会话里文件反而成功。
+**但真正的根因是 Python 版本**：同一台机器上，``os.startfile(目录)`` 在
+**3.9** 下成功，在 **3.14**（本程序 venv 用的）下失败 —— 3.14 给 startfile 加了
+``operation`` / ``arguments`` / ``show_cmd`` 参数，对目录的行为与旧版不同。
 
-保留的三层结构仍然有意义：
-- ``os.startfile`` **总是先试**（GetShellWindow 可能偶发为 0，不能因此误拒）
-- 只有在确认无外壳时才跳过 explorer / Qt，并给出准确原因
+所以现在：
+- **目录**走 Win32 ``ShellExecuteW``（:func:`_shell_execute`），不依赖 startfile，
+  且能看返回码（>32 成功）
+- **文件**仍用 ``os.startfile`` —— 走文件关联、不需要 shell，实测可用
+- 确认无桌面外壳（``GetShellWindow() == 0``）时给准确原因，不再刷一屏 error 5
 - explorer 的「启动成功但立刻退出」判定为失败 —— 那是「点了没反应」的来源
 """
 
@@ -111,6 +113,32 @@ def has_shell() -> bool:
         return True          # 探测不了就假定有，别把正常用户挡在外面
 
 
+def _shell_execute(text: str) -> bool:
+    """
+    直接调 Win32 ``ShellExecuteW``（不经过 ``os.startfile``）。
+
+    为什么不用 ``os.startfile`` 打开**目录**：实测同一台 Windows 上，
+    Python **3.9** 的 ``os.startfile(目录)`` 成功，而 **3.14**（本程序 venv 用的
+    版本）失败。3.14 给 ``startfile`` 加了 ``operation`` / ``arguments`` /
+    ``show_cmd`` 等参数，实现与旧版不同；与其猜它哪里变了，不如直接调底层 API ——
+    这正是 ``os.startfile`` 内部做的事，而且能拿到返回码判断成败。
+
+    ``ShellExecuteW`` 返回值 > 32 表示成功（其余是错误码，如 2=找不到文件、
+    5=拒绝访问、31=没有关联程序）。
+    """
+    if os.name != "nt":
+        return False
+    try:
+        import ctypes
+        rc = ctypes.windll.shell32.ShellExecuteW(      # type: ignore[attr-defined]
+            None, "open", text, None, None, 1)         # 1 = SW_SHOWNORMAL
+    except Exception as exc:                            # noqa: BLE001
+        return _fail("ShellExecuteW", exc)
+    if rc > 32:
+        return _ok()
+    return _fail("ShellExecuteW", OSError(f"返回 {rc}（>32 才算成功）"))
+
+
 def _explorer_launch(text: str, is_dir: bool) -> bool:
     """
     直接用资源管理器打开（Windows）。
@@ -155,26 +183,29 @@ def open_path(target) -> bool:
 
     if os.name == "nt":
         tried = True
-        # 第一级：os.startfile。**无论有没有 shell 都先试** ——
-        # GetShellWindow() 可能偶发返回 0（shell 正在重启等），
-        # 不该因此把能用的用户挡在外面。
-        try:
-            os.startfile(text)              # type: ignore[attr-defined]
-            return _ok()
-        except (OSError, AttributeError) as exc:
-            _fail("os.startfile", exc)
 
-        # 目录 + 确认没有 shell：后续两级必然失败（要请 Explorer 代劳），
-        # 直接给准确原因，别让用户在控制台看一串 error 5。
-        if is_dir and not has_shell():
-            _fail("open_path", OSError(
-                "当前会话没有 Explorer 桌面外壳（低完整性/无桌面会话），"
-                "无法打开文件夹；文件仍然可以直接打开"))
-            return False
-
-        # 第二级：直接拉资源管理器（仅在有 shell 时有意义）
-        if _explorer_launch(text, is_dir):
-            return True
+        if is_dir:
+            # 目录：直接用 Win32 API，避开 3.14 上行为不同的 os.startfile
+            if _shell_execute(text):
+                return True
+            # 确认没有 shell → 后面两级必然失败（都要请 Explorer 代劳），
+            # 直接给准确原因，别让用户在控制台看一串 error 5。
+            if not has_shell():
+                _fail("open_path", OSError(
+                    "当前会话没有 Explorer 桌面外壳（低完整性/无桌面会话），"
+                    "无法打开文件夹；文件仍然可以直接打开"))
+                return False
+            if _explorer_launch(text, True):
+                return True
+        else:
+            # 文件：os.startfile 走文件关联、不需要 shell，实测可用
+            try:
+                os.startfile(text)          # type: ignore[attr-defined]
+                return _ok()
+            except (OSError, AttributeError) as exc:
+                _fail("os.startfile", exc)
+            if _shell_execute(text):
+                return True
 
     if QtGui.QDesktopServices.openUrl(QtCore.QUrl.fromLocalFile(text)):
         return _ok()

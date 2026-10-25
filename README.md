@@ -100,12 +100,15 @@ run.bat engines list
 > os.startfile(输出目录) → 成功打开
 > ```
 >
-> 所以**结论是：代码没问题，桌面下能正常打开**。当初那次失败是因为**程序是从
-> 一个无桌面外壳的沙箱会话里启动的**（低完整性），打开文件夹必须请 Explorer 代劳，
-> 没有它就会被 UIPI 拒绝。
+> 但后续在**同一台机器的 cmd** 里复现了：`os.startfile(目录)` 用 **Python 3.9**
+> 成功，而程序（venv 里的 **3.14**）失败。原因是 3.14 给 `os.startfile` 加了
+> `operation` / `arguments` / `show_cmd` 参数，实现对**目录**的行为与旧版不同。
 >
-> 现在程序会探测 `GetShellWindow()`：没有外壳时给出准确原因，而不是三样东西
-> 各失败一次、刷一屏噪声。**但这不影响正常桌面**——`os.startfile` 总是先试。
+> 现在 Windows 下打开**目录**改走 Win32 `ShellExecuteW`（`os.startfile` 内部
+> 就是调它，但我们能拿到返回码判断成败），**不再依赖 `os.startfile`**；
+> 打开**文件**仍用 `os.startfile`（文件关联不需要 shell，实测可用）。
+> 另外会探测 `GetShellWindow()`：确认没有桌面外壳时给出准确原因，
+> 而不是三样东西各失败一次、刷一屏噪声。
 
 **在「无 shell 会话」里也依然有效的结论**
 
