@@ -223,7 +223,11 @@ class TestCaseInsensitivePaths:
 
     def test_duplicate_detected_across_case(self, tmp_path):
         (tmp_path / "Images").mkdir()
-        (tmp_path / "images").mkdir()          # Linux 上两者可并存
+        if os.name != "nt":
+            # POSIX 上 `Images` 与 `images` 可以并存；
+            # Windows 上它们是**同一个目录**，第二句 mkdir 会抛 FileExistsError
+            # —— 而那里恰好是真实场景，不需要造假目录
+            (tmp_path / "images").mkdir()
         with LibraryDB(tmp_path / "ci.db") as db:
             rm = RootManager(db, case_insensitive=True)
             rm.add(str(tmp_path / "Images"))
@@ -232,7 +236,8 @@ class TestCaseInsensitivePaths:
 
     def test_nesting_detected_across_case(self, tmp_path):
         (tmp_path / "Images" / "Sub").mkdir(parents=True)
-        (tmp_path / "images").mkdir()
+        if os.name != "nt":
+            (tmp_path / "images").mkdir()
         with LibraryDB(tmp_path / "ci2.db") as db:
             rm = RootManager(db, case_insensitive=True)
             rm.add(str(tmp_path / "Images"))
@@ -277,7 +282,9 @@ class TestCaseInsensitivePaths:
         """
         (tmp_path / "A").mkdir()
         (tmp_path / "B").mkdir()
-        (tmp_path / "b").mkdir()
+        if os.name != "nt":
+            # Windows 上 `B` 与 `b` 是同一个目录，不需要（也不能）再建一个
+            (tmp_path / "b").mkdir()
         with LibraryDB(tmp_path / "ci5.db") as db:
             rm = RootManager(db, case_insensitive=True)
             root_a = rm.add(str(tmp_path / "A"))

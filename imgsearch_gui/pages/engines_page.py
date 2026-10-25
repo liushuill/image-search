@@ -479,7 +479,7 @@ class EnginesPage(QtWidgets.QWidget):
         if not module:
             QtWidgets.QMessageBox.information(
                 self, "这不用于新建站点",
-                "这个入口是给**已经写好**的 Python 引擎做登记的，必须填模块路径。\n\n"
+                "这个入口是给已经写好的 Python 引擎做登记的，必须填模块路径。\n\n"
                 "想接一个新站点：用「新建引擎…」（填配置，不用写代码）。")
             return
         class_name, _ = QtWidgets.QInputDialog.getText(

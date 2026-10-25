@@ -31,6 +31,12 @@ REPO_DIR = Path(__file__).resolve().parent
 VENV_DIR = REPO_DIR / ".venv"
 IS_WINDOWS = os.name == "nt"
 
+# 最低解释器版本（与 pyproject.toml 的 requires-python 保持一致）
+MIN_PYTHON = (3, 10)
+
+# 重新执行自己时用的环境变量标记 —— 防止「换了个解释器还是太旧」时无限套娃
+_REEXEC_FLAG = "IMAGE_SEARCH_BOOTSTRAP_REEXEC"
+
 # 两种入口各自需要什么
 TARGETS = {
     "cli": {
@@ -54,11 +60,122 @@ def log(message: str) -> None:
     print(f"[image-search] {message}", file=sys.stderr, flush=True)
 
 
+def _version_text(info=None) -> str:
+    """把版本元组渲染成 “3.9.10” 这种可读形式"""
+    v = sys.version_info if info is None else info
+    return ".".join(str(part) for part in tuple(v)[:3])
+
+
+def _too_old() -> bool:
+    return tuple(sys.version_info[:2]) < MIN_PYTHON
+
+
+def find_newer_python() -> "str | None":
+    """
+    Windows：让 ``py`` 启动器找出一个 >= MIN_PYTHON 的解释器，返回其路径。
+
+    为什么需要这一步：``py -3`` 取的是**启动器配置的默认版本**，不一定是最新的。
+    实机复现（2026-10）：机器上同时装了 3.9 与 3.14，``py -3`` 却解析到 3.9 ——
+    于是 ``run.bat`` 拿 3.9 去建 venv，装依赖时退回源码编译（几分钟到十几分钟，
+    看起来像卡死），而真正的需求只是「用新一点的那个」。
+
+    只探测 ``3.15 … 3.10`` 这几档；**POSIX 上直接返回 None**（那边 python3
+    就一个，没有启动器，也就不用猜）。
+    """
+    if not IS_WINDOWS:
+        return None
+
+    for minor in range(15, MIN_PYTHON[1] - 1, -1):
+        try:
+            result = subprocess.run(
+                ["py", f"-3.{minor}", "-c", "import sys; print(sys.executable)"],
+                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, timeout=20,
+            )
+        except (OSError, subprocess.SubprocessError):
+            continue
+        if result.returncode != 0 or not result.stdout.strip():
+            continue
+
+        candidate = result.stdout.strip().splitlines()[-1].strip()
+        try:
+            if Path(candidate).resolve() == Path(sys.executable).resolve():
+                continue          # 就是当前这个（比如 py -3.9 指向自己）
+        except OSError:
+            pass
+        return candidate
+    return None
+
+
+def ensure_python_version(argv: list) -> None:
+    """
+    太旧的解释器直接给出可执行的指示，而不是让它在建 venv / 装依赖时
+    以一个和版本毫无关系的错误失败。
+
+    能换就换：Windows 上如果 ``py`` 启动器装着更新的版本，就**换过去重跑自己**，
+    用户什么都不用做。换不了才报错退出。
+
+    ``argv`` 用调用方传进来的那一个（与 ``main`` 同源），
+    而不是在这里读全局 ``sys.argv`` —— 否则这段逻辑没法被单独测试。
+    """
+    if not _too_old():
+        return
+
+    current = _version_text()
+    wanted = "%d.%d" % MIN_PYTHON
+    newer = None if os.environ.get(_REEXEC_FLAG) else find_newer_python()
+
+    if newer:
+        log(f"当前解释器是 Python {current}，低于所需的 {wanted}；改用 {newer}")
+        env = dict(os.environ)
+        env[_REEXEC_FLAG] = "1"
+        proc = subprocess.run(
+            [newer, str(REPO_DIR / "bootstrap.py"), *argv], env=env,
+        )
+        sys.exit(proc.returncode)
+
+    log(f"需要 Python {wanted} 或更高版本，但当前解释器是 Python {current}：")
+    log(f"  {sys.executable}")
+    log("怎么办：")
+    log("  · Windows：安装新版 Python（勾选 Add python.exe to PATH），"
+        "或直接用启动器指定版本： py -3.14 bootstrap.py gui")
+    log("  · Debian / Ubuntu：sudo apt install python3.11 python3.11-venv")
+    log("  · macOS：brew install python@3.12")
+    sys.exit(2)
+
+
 def venv_python() -> Path:
     """venv 里解释器的路径（Windows 与 POSIX 布局不同）"""
     if IS_WINDOWS:
         return VENV_DIR / "Scripts" / "python.exe"
     return VENV_DIR / "bin" / "python"
+
+
+def venv_version(venv_dir: Path = None) -> "tuple | None":
+    """
+    从 ``pyvenv.cfg`` 读出这个 venv 是用哪个版本建的。
+
+    读文件而不是跑子进程：这段逻辑在**每次启动**都会走，没必要为它多起一个进程。
+    取不到就返回 None（不当成错误 —— 那是别人的 venv 布局，不是我们的判断依据）。
+    """
+    cfg = (venv_dir or VENV_DIR) / "pyvenv.cfg"
+    try:
+        # utf-8-sig：容忍 BOM。Python 自己写的 pyvenv.cfg 没有 BOM，
+        # 但有些工具/脚本（如 Windows PowerShell 5.1 的 Set-Content）会加，
+        # 带着 BOM 时第一行的键会变成 "\ufeffversion"，匹配不上就成了「读不到」。
+        text = cfg.read_text(encoding="utf-8-sig", errors="replace")
+    except OSError:
+        return None
+    for line in text.splitlines():
+        key, _, value = line.partition("=")
+        if key.strip().lower() != "version":
+            continue
+        parts = value.strip().split(".")
+        try:
+            return (int(parts[0]), int(parts[1]))
+        except (IndexError, ValueError):
+            return None
+    return None
 
 
 def ensure_venv() -> Path:
@@ -68,6 +185,16 @@ def ensure_venv() -> Path:
     """
     python = venv_python()
     if python.exists():
+        # 旧版本建出来的 venv 会一直被复用，而它里面的依赖是按旧解释器装的 ——
+        # 症状是一堆「和版本毫无关系」的 ImportError / SyntaxError。
+        # 这里提前说清楚，并给出删掉重建的指示（.venv 只是依赖，删了不丢数据）。
+        built_by = venv_version()
+        if built_by is not None and built_by < MIN_PYTHON:
+            log(f"现有 {VENV_DIR.name} 是用 Python "
+                f"{built_by[0]}.{built_by[1]} 创建的，低于所需的 "
+                f"{MIN_PYTHON[0]}.{MIN_PYTHON[1]}，里面的依赖也不可用。")
+            log(f"请删除 {VENV_DIR} 后重新运行（它只含依赖，删掉不会丢任何数据）。")
+            sys.exit(2)
         return python
 
     log(f"首次运行：正在创建虚拟环境 {VENV_DIR.name} …")
@@ -130,6 +257,11 @@ def build_env() -> dict:
 
 
 def main(argv: list) -> int:
+    # ⚠️ 必须在**建 venv 之前**判版本：
+    # 否则一个 3.9 的解释器会一路走到「装依赖失败」，
+    # 报出来的却是一个和版本毫无关系的错误（实机见过：源码编译卡死十分钟）。
+    ensure_python_version(argv)
+
     if not argv or argv[0] not in TARGETS:
         print(__doc__)
         return 2

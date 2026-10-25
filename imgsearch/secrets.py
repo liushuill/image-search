@@ -72,9 +72,16 @@ def permission_status(is_windows: Optional[bool] = None) -> Tuple[str, bool]:
     return (f"权限是 {oct(mode)}，建议收紧为 600", True)
 
 
-def init_hint() -> str:
-    """首次创建 .env 的命令（随平台变化）"""
-    if IS_WINDOWS:
+def init_hint(is_windows: Optional[bool] = None) -> str:
+    """
+    首次创建 .env 的命令（随平台变化）。
+
+    与 :func:`permission_status` 一样接受 ``is_windows`` 覆盖：
+    否则「Windows 分支长什么样」这件事只能在 Windows 上测，
+    POSIX 上跑测试就会失败（本项目的测试要在两边都能过）。
+    """
+    win = IS_WINDOWS if is_windows is None else is_windows
+    if win:
         return "copy .env.example .env"
     return "cp .env.example .env && chmod 600 .env"
 

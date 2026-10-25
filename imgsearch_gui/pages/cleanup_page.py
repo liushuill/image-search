@@ -56,7 +56,7 @@ class CleanupPage(QtWidgets.QWidget):
 
         hint = QtWidgets.QLabel(
             "先「预演」看清要删什么，再执行。执行后会做 VACUUM 回收数据库文件空间，"
-            "并报告**真实释放的体积**。图片原文件不会被删除 —— 只动本工具的持久化数据。"
+            "并报告真实释放的体积。图片原文件不会被删除 —— 只动本工具的持久化数据。"
         )
         hint.setObjectName("PageHint")
         hint.setWordWrap(True)

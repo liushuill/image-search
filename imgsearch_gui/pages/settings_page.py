@@ -75,7 +75,7 @@ class SettingsPage(QtWidgets.QWidget):
 
         note = QtWidgets.QLabel(
             f"本机 Clash Verge / mihomo 常见端口是 {PROXY_HINT}。"
-            "代理**不是常开**也没关系：探测不通时程序会自动降级为直连，"
+            "代理不是常开也没关系：探测不通时程序会自动降级为直连，"
             "只影响本次运行、不会改这里的配置。"
         )
         note.setObjectName("FieldHelp")
