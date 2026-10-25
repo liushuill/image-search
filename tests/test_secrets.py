@@ -174,14 +174,24 @@ class TestPermissionStatus:
 
 
 class TestInitHint:
+    """
+    两个平台的分支都要能验证 —— 靠显式参数，而不是靠「测试恰好在哪个系统上跑」。
+
+    原先这里断言 ``IS_WINDOWS is False``，于是整套测试在 Windows 上必失败，
+    「测试全绿」这个回归信号在 Windows 上就失效了。
+    """
+
     def test_posix_hint_uses_chmod(self):
-        assert "chmod 600" in secrets.init_hint()
+        assert "chmod 600" in secrets.init_hint(is_windows=False)
 
     def test_windows_hint_uses_copy(self):
-        assert secrets.IS_WINDOWS is False        # 本机是 POSIX
-        # 直接验证 Windows 那条分支的语义：不该出现 chmod
-        hint_posix = secrets.init_hint()
-        assert "cp " in hint_posix
+        hint = secrets.init_hint(is_windows=True)
+        assert "copy " in hint
+        assert "chmod" not in hint
+
+    def test_default_follows_platform(self):
+        expected = "copy " if secrets.IS_WINDOWS else "cp "
+        assert expected in secrets.init_hint()
 
 
 class TestDeclaredSecrets:
