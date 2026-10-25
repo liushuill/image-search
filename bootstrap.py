@@ -322,8 +322,11 @@ def check_version_pin(python: Path, spec: dict) -> None:
     log(f"⚠️ {name} 版本是 {'.'.join(map(str, current))}，不在 "
         f"{spec['requirements']} 要求的范围内{want}{cap}。")
     if too_high and name == "PySide6":
-        log("   已知 PySide6 6.12.0 会让程序在退出时崩溃"
-            "（用例全过，退出码 0xC0000409）。")
+        log("   注意：当初观察到 6.12.0 在这个项目上「用例全过、退出时 "
+            "0xC0000409」。")
+        log("   0xC0000409 是 Windows 上 abort() 的返回码，根因可能不在 6.12 "
+            "本身，")
+        log("   而是程序自己的线程收尾（已修）。限制暂保留，待复测。")
     log("   修复办法（二选一，都可以照抄）：")
     log(f"     · 让它自己修：删除 {VENV_DIR} 后重新运行本脚本（.venv 只含依赖，"
         "删掉不丢数据）")
