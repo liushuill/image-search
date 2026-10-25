@@ -202,9 +202,11 @@ class TestShellContextInError:
         """失败信息要能自证环境：GetShellWindow=0 说明是无 shell 会话"""
         monkeypatch.setattr(os, "name", "nt")
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
-        monkeypatch.setattr(shell_open, "_shell_context", lambda: "（GetShellWindow=0，无桌面外壳）")
+        monkeypatch.setattr(shell_open, "_shell_context",
+                            lambda: "（GetShellWindow=0（无桌面外壳）；Python 3.14.5）")
         shell_open.open_path("C:/x")
-        assert "GetShellWindow=0" in shell_open.last_error()
+        err = shell_open.last_error()
+        assert "GetShellWindow=0" in err and "Python 3.14.5" in err
 
 
 class TestOpenUrl:

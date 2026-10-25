@@ -60,12 +60,19 @@ def _shell_context() -> str:
     """
     if os.name != "nt":
         return ""
+    import sys as _sys
+    parts = []
     try:
         import ctypes
         hwnd = ctypes.windll.user32.GetShellWindow()      # type: ignore[attr-defined]
+        parts.append(f"GetShellWindow={hwnd}（{'有' if hwnd else '无'}桌面外壳）")
     except Exception:                                     # noqa: BLE001
-        return ""
-    return f"（GetShellWindow={hwnd}，{'有' if hwnd else '无'}桌面外壳）"
+        parts.append("GetShellWindow=探测失败")
+    # 解释器也带上：同一个 startfile 在不同 Python 版本/不同 venv 下表现可能不同，
+    # 报错时能直接看出是不是"用了另一个解释器"
+    parts.append(f"Python {_sys.version.split()[0]}")
+    parts.append(f"{_sys.executable}")
+    return "（" + "；".join(parts) + "）"
 
 
 def _fail(step: str, exc: BaseException) -> bool:
