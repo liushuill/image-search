@@ -19,6 +19,22 @@ import pytest
 from imgsearch_gui import shell_open
 
 
+def _startfile_denied(path):
+    """模拟 ``os.startfile`` 被拒（低完整性会话里的真实表现）。
+
+    为什么兜底链的用例**必须**显式屏蔽第一级：
+
+    - 在 POSIX 上 ``os.startfile`` 根本不存在（抛 AttributeError），链路自然往下走；
+    - 但在**真 Windows 的正常桌面**上，它对目录**真的会成功** ——
+      于是 ``open_path`` 在第一级就 return 了，后面被测的 explorer / Qt 分支
+      一步都走不到，测试反而失败（实测：真 Windows 上挂 2 项）。
+
+    这也是"测试只在某些宿主上通过"的典型陷阱：断言的对象不是被测分支，
+    而是宿主的能力。
+    """
+    raise OSError(13, "Access is denied（模拟 ShellExecute 被 UIPI 拒绝）")
+
+
 class TestOpenPath:
     def test_windows_dir_uses_shell_execute_with_native_path(self, monkeypatch):
         """
@@ -63,6 +79,8 @@ class TestOpenPath:
         """ShellExecuteW 失败 → 用 explorer 打开目录；成功时不再走 Qt"""
         calls = []
         monkeypatch.setattr(os, "name", "nt")
+        # 第一级必须屏蔽：真 Windows 上它会把目录打开成功，后面就测不到了
+        monkeypatch.setattr(os, "startfile", _startfile_denied, raising=False)
         monkeypatch.setattr(shell_open, "_is_dir", lambda t: True)
         monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: True)
@@ -152,6 +170,8 @@ class TestNoShellSession:
         # 不要 patch pathlib.Path：PosixPath 在真 Windows 上会抛
         # UnsupportedOperation。改 patch 产品代码里的 _is_dir。
         monkeypatch.setattr(os, "name", "nt")
+        # 同上：不屏蔽第一级的话，真 Windows 上它会把目录打开成功
+        monkeypatch.setattr(os, "startfile", _startfile_denied, raising=False)
         monkeypatch.setattr(shell_open, "_is_dir", lambda t: True)
         monkeypatch.setattr(shell_open, "_shell_execute", lambda text: False)
         monkeypatch.setattr(shell_open, "has_shell", lambda: False)
@@ -258,7 +278,11 @@ class TestShellContext:
         assert "进程完整性=Low" in ctx
         assert "Python" in ctx
 
-    def test_context_is_empty_on_posix(self):
+    def test_context_is_empty_on_posix(self, monkeypatch):
+        # ⚠️ 这条断言的是「POSIX 上不产生线索」。真 Windows 上 _shell_context()
+        #    必然返回内容（GetShellWindow / Python 版本 / 完整性），所以不能
+        #    依赖宿主平台 —— 把 os.name 切成 posix 才测得到这条分支。
+        monkeypatch.setattr(os, "name", "posix")
         assert shell_open._shell_context() == ""
 
 
