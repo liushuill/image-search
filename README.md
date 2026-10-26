@@ -72,6 +72,10 @@ run.bat search 图片.jpg            :: 命令行
 run.bat engines list
 ```
 
+> **PowerShell 要写成 `.\run-gui.bat`**：PowerShell 不把当前目录放进 PATH，
+> 直接敲 `run-gui.bat` 会得到 `CommandNotFoundException`。
+> `cmd.exe` 里两种写法都行。
+
 首次运行会自动创建 `.venv` 并安装依赖。若提示找不到 Python：
 
 - 到 <https://www.python.org/downloads/> 安装，**安装时勾选 "Add python.exe to PATH"**
@@ -125,7 +129,8 @@ run.bat engines list
 
 **另外单独验证过的**
 
-- ✅ **打开输出目录**：正常桌面（Medium + Explorer 在跑）下 `os.startfile` 成功
+- ✅ **打开输出目录 / 打开文件夹**：在**干净目录**（Medium + Explorer 在跑）下实测通过，
+  资源管理器正常弹出（详见「常见问题 → Windows 打不开文件夹」）
 - ✅ `bootstrap.py` 在「`py` 默认解析到 3.9.10、`python` 是应用商店占位符」的机器上，
   仍能正确换到 3.14 并跑起来
 
@@ -880,6 +885,84 @@ class MyEngine(SearchEngine):
 > `pyproject.toml` 刻意**不重复声明依赖**，避免同一事实写在多处。
 
 ---
+
+## 常见问题（故障排查）
+
+### Windows：点「打开导出目录」没反应 / 报 error 5
+
+**症状**（三种表现，根因相同）：
+
+```
+qt.qpa.services: ShellExecute 'file:///C:/.../output' failed (error 5)
+```
+
+- 弹窗说「无法打开」，原因里是 `PermissionError: [WinError 5] 拒绝访问`
+- 或者干脆**点了没反应**（程序以为成功，其实什么都没打开）
+- 有时伴随 `explorer 立即退出，code=0xc0000142`
+
+**原因：进程跑在「低完整性（Low）」下，被 UIPI 挡住。**
+
+打开**文件夹**不是程序自己能做到的事 —— 它必须请正在运行的 Explorer 代劳。
+而 Low 完整性的进程不允许向 Medium 的 Explorer 发窗口消息，于是：
+
+| 操作 | 低完整性下的结果 |
+|---|---|
+| 打开**文件夹** | ❌ WinError 5（需要 shell） |
+| 打开**文件** | ✅ 正常（走文件关联，直接起子进程，不需要 shell） |
+
+**怎么来的：** 如果**上级目录**带 Low 强制标签且有继承标记（`(OI)(CI)`），
+在里面创建的 `.venv` 会继承这个标签，于是 venv 里的 python 跑在 Low 完整性。
+常见于：项目放在某个被沙箱/受限进程创建过的目录里（CI 工作区、某些同步盘、
+安全软件的重定向目录等）。
+
+**自查（Windows PowerShell）：**
+
+```powershell
+# 1. venv 里的 python 处于什么完整性？Low 就是中招了
+.\.venv\Scripts\python.exe -c "from imgsearch_gui.shell_open import process_integrity as p; print(p())"
+
+# 2. 文件本身有没有 Low 标签
+icacls .\.venv\Scripts\python.exe | Select-String "Mandatory"
+
+# 3. 上级目录是不是元凶（有则说明会被继承）
+icacls C:\path\to\你的\项目父目录 | Select-String "Mandatory"
+```
+
+程序自己也会提示：启动时若检测到 Low 会打印警告；「打不开」的弹窗里
+带一行 `进程完整性=Low`。
+
+**修复：把项目移出那个目录，再重建 venv。**
+
+```powershell
+mkdir C:\Users\你\image-search          # 普通目录
+cd C:\Users\你\image-search
+git clone https://github.com/liushuill/image-search.git
+cd image-search
+copy C:\旧位置\image-search\config.json .   # 个人配置
+copy C:\旧位置\image-search\.env .          # 凭据
+xcopy /E /I C:\旧位置\image-search\data data  # 图库（数据库 + 缩略图）
+.\run-gui.bat                                  # 在这里重建 venv
+```
+
+> ⚠️ **只删 `.venv` 重建是没用的** —— 只要还在同一个父目录下，
+> 新文件照样继承 Low 标签。必须换目录。
+>
+> ⚠️ 也**不要**直接给那个父目录改完整性标签：如果它同时是别的工具的工作区，
+> 提权会让那些工具失去写权限。换目录最安全。
+
+**验证修好了：**
+
+```powershell
+.\.venv\Scripts\python.exe -c "from imgsearch_gui.shell_open import process_integrity as p; print(p())"
+# 期望输出 Medium，而不是 Low
+```
+
+### PySide6 6.12 退出时崩溃
+
+`requirements-gui.txt` 目前限制 `PySide6<6.12`。原因与复现条件见该文件里的注释
+（简版：6.12.0 上出现过「用例全过、退出码 `0xC0000409`」）。
+**这条是在低完整性会话里观察到的**，换到普通桌面后是否仍复现尚未确认 ——
+如果你在正常环境跑 6.12 没崩，欢迎反馈，那这个限制就可以撤掉。
 
 ## 平台差异
 
