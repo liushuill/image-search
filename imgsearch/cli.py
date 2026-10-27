@@ -72,7 +72,8 @@ from typing import List, Optional
 
 # 项目以包的形式运行（python -m imgsearch），无需注入 sys.path
 from imgsearch import secrets
-from imgsearch.config import get, save_config, load_config, is_secret_key, PROJECT_DIR
+from imgsearch.config import (get, save_config, load_config, is_secret_key,
+                             PLUGIN_DIR)
 from imgsearch.engines.registry import resolve_engine_class
 from imgsearch.engines.schema import ConfigError
 from imgsearch.service import search_with_cache
@@ -1206,7 +1207,7 @@ def _scaffold_custom_engine(name: str) -> None:
         sys.exit(1)
 
     cls_name = "".join(part.capitalize() for part in safe.split("_")) or "MyEngine"
-    pkg_dir = PROJECT_DIR / "my_engines"
+    pkg_dir = PLUGIN_DIR
     pkg_dir.mkdir(parents=True, exist_ok=True)
 
     init_file = pkg_dir / "__init__.py"

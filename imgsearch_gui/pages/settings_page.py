@@ -226,11 +226,13 @@ class SettingsPage(QtWidgets.QWidget):
         Qt 用 LGPL-3.0：分发编译产物时必须有「显著告知」——用户需知道
         程序用到了 Qt、且该 Qt 的使用受 LGPL 约束。程序内这个入口就是那条告知。
         """
-        from imgsearch.config import PROJECT_DIR
+        from imgsearch.config import APP_DIR
 
         text = ""
-        for candidate in (PROJECT_DIR / "THIRD_PARTY_NOTICES.md",
-                          PROJECT_DIR / "_internal" / "THIRD_PARTY_NOTICES.md"):
+        # 这是**只读资源**，跟着程序走（打包后在 _internal/ 里），
+        # 与用户数据目录无关
+        for candidate in (APP_DIR / "THIRD_PARTY_NOTICES.md",
+                          APP_DIR / "_internal" / "THIRD_PARTY_NOTICES.md"):
             if candidate.is_file():
                 try:
                     text = candidate.read_text(encoding="utf-8")

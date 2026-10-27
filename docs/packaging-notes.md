@@ -21,62 +21,43 @@
 
 ---
 
-## 二、🔴 阻塞项：数据目录必须先改
+## 二、数据目录（已改造完成，2026-10）
 
-### 现状
+打包后程序目录可能在 `Program Files`（只读）或升级时被整体替换，
+所以「只读资源」和「可写数据」必须分开。
 
-所有数据都写在**程序所在目录旁边**：
-
-```python
-# imgsearch/config.py
-PROJECT_DIR  = Path(__file__).resolve().parent.parent
-DATA_DIR     = PROJECT_DIR / "data"
-_CONFIG_FILE = PROJECT_DIR / "config.json"
-# imgsearch/secrets.py 里同样算了一遍
-ENV_FILE     = PROJECT_DIR / ".env"
-```
-
-### 打包后的实测结果
+### 现在的行为
 
 ```
-dist/ImageSearch/
-├── ImageSearch              ← 可执行文件
-└── _internal/
-    ├── config.json          ← 🔴 配置写在这里
-    └── data/                ← 🔴 图库、缩略图写在这里
+APP_DIR    只读资源：代码、config.example.json、THIRD_PARTY_NOTICES.md、LICENSES/
+DATA_ROOT  可写数据：config.json、.env、data/（数据库+缩略图）、output/、my_engines/
 ```
 
-### 三个后果
+`DATA_ROOT` 的选择顺序（`config._resolve_data_root()`）：
 
-| 场景 | 后果 |
-|---|---|
-| 装到 `C:\Program Files\` | 无写权限 → 报错或静默失败 |
-| 程序升级 | `_internal/` 被整个替换 → **用户数据全丢** |
-| 用 `--onefile` | `_internal/` 是临时目录 → **退出即丢** |
+| 顺序 | 条件 | 结果 |
+|---|---|---|
+| 1 | 环境变量 `IMGSEARCH_DATA_DIR` | 用它（测试 / 临时指定 / 高级用户） |
+| 2 | exe 旁边有 `portable.txt` | 数据就留在 exe 旁（便携版） |
+| 3 | **打包运行** | Windows `%LOCALAPPDATA%\image-search`<br>macOS `~/Library/Application Support/image-search`<br>Linux `$XDG_DATA_HOME/image-search`（缺省 `~/.local/share/image-search`） |
+| 4 | **源码运行** | 仓库目录（**与改造前完全一致**，不需要迁移） |
 
-### 改法（待实施）
+> Windows 用 `LOCALAPPDATA` 而不是 `APPDATA`：图库+缩略图可能上百 MB，
+> 不该跟着漫游配置文件同步。
 
-1. 在 `imgsearch/config.py` 里引入 `DATA_ROOT`：
-   ```python
-   if getattr(sys, "frozen", False):
-       # 打包后：用系统用户数据目录
-       Windows: %APPDATA%\image-search
-       Linux:   ~/.local/share/image-search   （尊重 XDG_DATA_HOME）
-       macOS:   ~/Library/Application Support/image-search
-   else:
-       # 源码运行：保持现状（仓库目录）
-       DATA_ROOT = PROJECT_DIR
-   ```
-2. `secrets.py` 不要再自己算一遍，改成从 `config` 导入。
-3. **迁移**：源码运行时数据在仓库里，切到打包版后要能找到旧数据 ——
-   首次启动时若新目录为空、旧目录有数据，提示或自动迁移。
-4. 可选的「便携模式」：exe 旁边存在 `portable.txt` 时，数据就放 exe 旁边。
-5. 测试：`sys.frozen` 两条分支都要覆盖。
+### 其它连带改动
 
-> ⚠️ **必须在第一次公开发布二进制之前完成**。发布之后再改，就得迁移
-> 所有用户已经产生的数据。
+- `secrets.py` 不再自己算路径，改为 `from imgsearch.config import ENV_FILE`
+  （此前两处各算一遍，打包后会分裂成两个 `.env`）
+- 自定义 Python 引擎目录改为 `PLUGIN_DIR`（打包后在数据根下），
+  `registry` 导入前会把它的父目录补进 `sys.path`
+- `.gitignore` 增加 `/build/` `/dist/` `*.spec` `portable.txt`
 
----
+### 首次发布前仍需人工确认
+
+- [ ] 在没有 Python 的机器上跑打包产物：数据是否落在用户目录
+- [ ] 关闭再打开：图库还在
+- [ ] 升级（覆盖安装）：数据不丢
 
 ## 三、打包步骤
 

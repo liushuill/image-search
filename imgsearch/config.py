@@ -12,17 +12,79 @@
 
 import json
 import os
+import sys
 from pathlib import Path
 
-# 仓库根目录。本文件位于 imgsearch/ 下，故取上级目录。
-# ⚠️ 这里必须用 resolve().parent.parent：若写成 Path(__file__).parent，
-# 配置与 data/output 目录会错位到 imgsearch/ 内部。
-PROJECT_DIR = Path(__file__).resolve().parent.parent
+# ── 两个不同的根 ──────────────────────────────────────────────
+#
+# APP_DIR   ：**只读资源**所在处（代码、config.example.json、LICENSES/…）
+# DATA_ROOT ：**可写数据**所在处（config.json、.env、data/、output/）
+#
+# 为什么必须分开：打包成 exe 后，APP_DIR 在安装目录里（可能只读、且升级时会被
+# 整个替换），数据写在那里要么没权限、要么升级即丢。详见 docs/packaging-notes.md。
+
+# 只读资源根目录（本文件位于 imgsearch/ 下，故取上级目录）
+# ⚠️ 必须用 resolve().parent.parent：若写成 Path(__file__).parent，
+#    资源会错位到 imgsearch/ 内部。
+APP_DIR = Path(__file__).resolve().parent.parent
+
+# 兼容旧名字（此前 APP_DIR 与数据目录是同一个根）
+PROJECT_DIR = APP_DIR
+
+
+def _is_windows() -> bool:
+    """抽成函数是为了**可测试**：直接 patch os.name 会让 pathlib.Path 选错实现
+    （工厂在调用时按 os.name 决定 WindowsPath/PosixPath，在 Linux 上会直接抛错）"""
+    return os.name == "nt"
+
+
+def _is_macos() -> bool:
+    return sys.platform == "darwin"
+
+
+def _resolve_data_root() -> Path:
+    """
+    决定**可写数据**放在哪里。四级优先：
+
+    1. 环境变量 ``IMGSEARCH_DATA_DIR`` —— 测试、临时指定、高级用户
+    2. **便携模式**：exe 旁边放一个 ``portable.txt``，数据就留在 exe 旁
+    3. **打包运行**：平台规范的用户目录
+         Windows  ``%LOCALAPPDATA%\\image-search``
+         macOS    ``~/Library/Application Support/image-search``
+         Linux    ``$XDG_DATA_HOME/image-search``（缺省 ``~/.local/share/...``）
+    4. **源码运行**：仓库目录（保持原有行为，一个字节都不变）
+
+    为什么 Windows 用 LOCALAPPDATA 而不是 APPDATA：图库 + 缩略图可能上百 MB，
+    不该跟着漫游配置文件同步。
+    """
+    override = os.environ.get("IMGSEARCH_DATA_DIR", "").strip()
+    if override:
+        return Path(override).expanduser().resolve()
+
+    if not getattr(sys, "frozen", False):
+        return APP_DIR                      # 源码运行：维持现状
+
+    exe_dir = Path(sys.executable).resolve().parent
+    if (exe_dir / "portable.txt").is_file():
+        return exe_dir                      # 便携模式
+
+    if _is_windows():
+        base = (os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
+                or str(Path.home()))
+        return Path(base) / "image-search"
+    if _is_macos():
+        return Path.home() / "Library" / "Application Support" / "image-search"
+    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+    return Path(base) / "image-search"
+
+
+# 可写数据根目录
+DATA_ROOT = _resolve_data_root()
 
 # 输出目录（导出的结果 / 可选下载的高清原图）
-OUTPUT_DIR = PROJECT_DIR / "output"
+OUTPUT_DIR = DATA_ROOT / "output"
 # 数据目录
-DATA_DIR = PROJECT_DIR / "data"
+DATA_DIR = DATA_ROOT / "data"
 # 缓存目录
 CACHE_DIR = DATA_DIR / "cache"
 # 数据库路径（SQLite 图库）
@@ -30,7 +92,12 @@ DB_PATH = DATA_DIR / "image_metadata.db"
 # 缩略图缓存目录（按内容哈希分桶存放，与文件路径无关）
 THUMBS_DIR = DATA_DIR / "thumbs"
 
-_CONFIG_FILE = PROJECT_DIR / "config.json"
+_CONFIG_FILE = DATA_ROOT / "config.json"
+# 凭据文件也放在数据根下（secrets 从本模块导入它，避免两处各算一遍）
+ENV_FILE = DATA_ROOT / ".env"
+
+# 自定义 Python 引擎目录：打包后不能写安装目录，放到数据根下
+PLUGIN_DIR = DATA_ROOT / "my_engines"
 
 # 敏感键 → 环境变量名。这些键永不落 config.json，读写都转交 secrets。
 _SECRET_KEYS = {

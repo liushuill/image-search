@@ -20,9 +20,9 @@ import stat
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-# 仓库根目录（本文件在 imgsearch/ 下）
-PROJECT_DIR = Path(__file__).resolve().parent.parent
-ENV_FILE = PROJECT_DIR / ".env"
+# 凭据文件的位置由 config 统一决定（打包后它会落到用户数据目录，
+# 而不是安装目录 —— 两处各算一遍正是之前那种"两个 .env"的来源）
+from imgsearch.config import ENV_FILE  # noqa: E402
 
 # 已知凭据 → 用途说明（供 CLI 展示与校验）
 # 已知凭据的**兜底说明**。真正权威的来源是各引擎 schema 里的 secret 字段

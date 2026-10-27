@@ -334,6 +334,27 @@ meta    (key, value)                                   内部元信息
 
 ---
 
+## 数据放在哪里
+
+程序把文件分成两类，位置可能不同：
+
+| 类别 | 内容 | 位置 |
+|---|---|---|
+| **只读资源** | 代码、`config.example.json`、`LICENSES/`、`THIRD_PARTY_NOTICES.md` | 程序所在目录 |
+| **可写数据** | `config.json`、`.env`、`data/`（数据库 + 缩略图）、`output/`、`my_engines/` | 见下 |
+
+可写数据的位置按以下顺序决定：
+
+1. 环境变量 `IMGSEARCH_DATA_DIR` —— 想放哪就放哪
+2. exe 旁边有 `portable.txt` → 数据就留在 exe 旁（**便携版**）
+3. **打包运行** → 平台规范的用户目录
+   - Windows `%LOCALAPPDATA%\image-search`
+   - macOS `~/Library/Application Support/image-search`
+   - Linux `$XDG_DATA_HOME/image-search`（缺省 `~/.local/share/image-search`）
+4. **源码运行** → 仓库目录（就是你现在看到的样子）
+
+> 从源码跑的用户**不需要迁移任何东西** —— 第 4 条与改造前完全一致。
+
 ## 仓库里入库什么、不入库什么
 
 `git archive`（也就是推上去的整包）只含**源码 + 模板 + 占位符**：

@@ -222,6 +222,13 @@ def resolve_engine_class(ec) -> Optional[Type]:
             return cached
 
         try:
+            # 自定义引擎目录可能不在 sys.path 上（打包后它在用户数据目录，
+            # 源码运行时它在仓库根下）。导入前确保其**父目录**在路径里，
+            # 否则 `my_engines.xxx` 这种模块名解析不到。
+            from imgsearch.config import PLUGIN_DIR
+            parent = str(PLUGIN_DIR.parent)
+            if parent not in sys.path:
+                sys.path.insert(0, parent)
             module = importlib.import_module(module_path)
         except ImportError as e:
             print(f"  ⚠️ 加载自定义引擎 '{engine_name}' 失败：找不到模块 '{module_path}'")
