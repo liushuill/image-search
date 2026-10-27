@@ -80,9 +80,13 @@ class SearchPage(QtWidgets.QWidget):
 
         ol.addWidget(self._label("搜索引擎"))
         self.engine_combo = QtWidgets.QComboBox()
-        # ⚠️ 默认策略下，下拉框会被左栏宽度压窄，
-        #    「自动（按权重依次尝试）」末尾的字会被裁掉（实测差 9px）。
-        #    这里按最长的条目文字实测宽度定最小宽度（见 _fit_engine_combo）。
+        self.engine_combo.currentIndexChanged.connect(self._sync_engine_tooltip)
+        # 下拉框本身要**跟随左栏宽度**（曾经按最长条目设 minimumWidth，
+        # 结果 339px 撑爆了 252px 的左栏，卡片边框被压得看不出来）。
+        # 长名字的完整显示交给弹出列表（见 _fit_engine_combo）。
+        self.engine_combo.setSizeAdjustPolicy(
+            QtWidgets.QComboBox.AdjustToMinimumContentsLengthWithIcon)
+        self.engine_combo.setMinimumContentsLength(1)
         ol.addWidget(self.engine_combo)
 
         self.refresh_check = QtWidgets.QCheckBox("重新搜索（忽略图库缓存）")
@@ -192,10 +196,12 @@ class SearchPage(QtWidgets.QWidget):
 
     def _fit_engine_combo(self) -> None:
         """
-        让引擎下拉框至少能装下最长的那条文字。
+        让**弹出列表**装得下最长的引擎名，而不是把组合框本身撑宽。
 
-        单纯调 setSizeAdjustPolicy 不行：它的 sizeHint 只按「字符数」估，
-        而中文是宽字符，估出来偏小（实测要 235px，估成 146px）。
+        走过的弯路：为了不裁字，直接给组合框设了 minimumWidth（339px），
+        结果它比左栏（252px）还宽，溢出卡片、把边框挤没了 —— 看起来像布局坏了。
+        正确做法：组合框跟随栏宽（放不下的部分由 Qt 省略），
+        弹出列表单独给足宽度，再补一个 tooltip 显示完整名称。
         """
         fm = self.engine_combo.fontMetrics()
         widths = [fm.horizontalAdvance(self.engine_combo.itemText(i))
@@ -203,7 +209,14 @@ class SearchPage(QtWidgets.QWidget):
         if not widths:
             return
         need = max(widths) + 44          # +44：下拉箭头、内边距、边框
-        self.engine_combo.setMinimumWidth(max(need, 180))
+        # 弹出列表可以比组合框宽 —— 这里才是"完整显示名字"的地方
+        self.engine_combo.view().setMinimumWidth(need)
+        self.engine_combo.setMinimumWidth(0)
+        self._sync_engine_tooltip()
+
+    def _sync_engine_tooltip(self) -> None:
+        """当前选中的引擎名可能被省略号截断，用 tooltip 补全"""
+        self.engine_combo.setToolTip(self.engine_combo.currentText())
 
     # ── 选图 ────────────────────────────────────
 

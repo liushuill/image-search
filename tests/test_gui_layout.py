@@ -70,7 +70,26 @@ class TestBatchDialogLayout:
 
 
 class TestSearchPageCombo:
-    def test_engine_combo_fits_longest_text(self, qapp, store):
+    def test_combo_does_not_overflow_its_card(self, qapp, store):
+        """
+        组合框要**跟随栏宽**，不能为了不裁字把自己撑宽。
+
+        走过的弯路：按最长引擎名给组合框设 minimumWidth（339px），
+        比左栏（252px）还宽 → 溢出卡片、边框被压没，看起来像布局坏了。
+        """
+        from imgsearch_gui.pages.search_page import SearchPage
+        page = SearchPage()
+        try:
+            combo = page.engine_combo
+            card = combo.parent()
+            assert combo.width() <= card.width(), (
+                f"下拉 {combo.width()}px 溢出卡片 {card.width()}px")
+            assert combo.minimumWidth() <= 64, "不该靠最小宽度撑开"
+        finally:
+            page.close()
+
+    def test_popup_is_wide_enough_for_longest_name(self, qapp, store):
+        """完整名字由**弹出列表**负责显示，组合框里可以被省略"""
         from imgsearch_gui.pages.search_page import SearchPage
         page = SearchPage()
         try:
@@ -78,9 +97,17 @@ class TestSearchPageCombo:
             fm = combo.fontMetrics()
             need = max(fm.horizontalAdvance(combo.itemText(i))
                        for i in range(combo.count()))
-            assert combo.minimumWidth() >= need, (
-                f"下拉最小宽度 {combo.minimumWidth()} < 最长文字 {need}，会被裁"
-            )
+            assert combo.view().minimumWidth() >= need
+        finally:
+            page.close()
+
+    def test_tooltip_shows_full_current_text(self, qapp, store):
+        """组合框里的文字可能被省略号截断，tooltip 要能看全"""
+        from imgsearch_gui.pages.search_page import SearchPage
+        page = SearchPage()
+        try:
+            combo = page.engine_combo
+            assert combo.toolTip() == combo.currentText()
         finally:
             page.close()
 
