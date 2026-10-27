@@ -289,14 +289,14 @@ class SearchPage(QtWidgets.QWidget):
         if outcome.from_cache:
             self.status.set_text(
                 f"📚 图库命中（{outcome.match_kind}）· 结果来自缓存，未消耗搜索配额",
-                style.OK)
+                style.OK, flash=True, tint=style.OK)
         elif outcome.results:
             top = outcome.results[0]
             self.status.set_text(
                 f"✅ 找到 {len(outcome.results)} 条结果"
                 f"（最佳：{top.source} {top.similarity:.1f}%）"
                 + ("　已记入图库" if outcome.record_id else ""),
-                style.OK)
+                style.OK, flash=True, tint=style.OK)
         else:
             self.status.set_text("未找到匹配结果", style.WARN, flash=True)
 
