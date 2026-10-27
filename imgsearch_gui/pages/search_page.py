@@ -8,6 +8,7 @@ from PySide6 import QtCore, QtGui, QtWidgets
 
 from imgsearch.engines.store import get_store
 from imgsearch_gui import style
+from imgsearch_gui.widgets.flash_label import FlashLabel
 from imgsearch_gui.widgets.drop_area import DropArea, IMAGE_SUFFIXES
 from imgsearch_gui.widgets.result_table import ResultTable
 from imgsearch_gui.workers import SearchWorker
@@ -113,7 +114,7 @@ class SearchPage(QtWidgets.QWidget):
 
         # 状态条
         status = QtWidgets.QHBoxLayout()
-        self.status = QtWidgets.QLabel("等待图片…")
+        self.status = FlashLabel("等待图片…")
         self.status.setObjectName("PageHint")
         status.addWidget(self.status, 1)
 
@@ -212,8 +213,7 @@ class SearchPage(QtWidgets.QWidget):
 
         什么都不发生是最糟的反馈：用户分不清"卡住了"还是"拖错了"。
         """
-        self.status.setText(text)
-        self.status.setStyleSheet(f"color:{style.MUTED};")
+        self.status.set_text(text, style.MUTED, flash=True)
 
     def _pick_file(self) -> None:
         patterns = " ".join(f"*{s}" for s in sorted(IMAGE_SUFFIXES))
@@ -252,8 +252,7 @@ class SearchPage(QtWidgets.QWidget):
         self._set_preview(path)
         self.table.set_results([])
         self.copy_btn.setEnabled(False)
-        self.status.setText("正在搜索…")
-        self.status.setStyleSheet(f"color:{style.MUTED};")
+        self.status.set_text("正在搜索…", style.MUTED)
         self.log.clear()
         self._append_log(f"开始搜索：{path}")
 
@@ -286,25 +285,21 @@ class SearchPage(QtWidgets.QWidget):
         self.export_btn.setEnabled(bool(outcome.results))
 
         if outcome.from_cache:
-            self.status.setText(
-                f"📚 图库命中（{outcome.match_kind}）· 结果来自缓存，未消耗搜索配额"
-            )
-            self.status.setStyleSheet(f"color:{style.OK}; font-weight:600;")
+            self.status.set_text(
+                f"📚 图库命中（{outcome.match_kind}）· 结果来自缓存，未消耗搜索配额",
+                style.OK)
         elif outcome.results:
             top = outcome.results[0]
-            self.status.setText(
+            self.status.set_text(
                 f"✅ 找到 {len(outcome.results)} 条结果"
                 f"（最佳：{top.source} {top.similarity:.1f}%）"
-                + ("　已记入图库" if outcome.record_id else "")
-            )
-            self.status.setStyleSheet(f"color:{style.OK}; font-weight:600;")
+                + ("　已记入图库" if outcome.record_id else ""),
+                style.OK)
         else:
-            self.status.setText("未找到匹配结果")
-            self.status.setStyleSheet(f"color:{style.WARN}; font-weight:600;")
+            self.status.set_text("未找到匹配结果", style.WARN, flash=True)
 
     def _on_failed(self, message: str) -> None:
-        self.status.setText("搜索失败 —— 详见下方过程日志")
-        self.status.setStyleSheet(f"color:{style.ERR}; font-weight:600;")
+        self.status.set_text("搜索失败 —— 详见下方过程日志", style.ERR, flash=True)
         self._toggle_log(True)
         self.log_toggle.setChecked(True)
 
@@ -333,7 +328,7 @@ class SearchPage(QtWidgets.QWidget):
         if not urls:
             return
         QtWidgets.QApplication.clipboard().setText("\n".join(urls))
-        self.status.setText(f"已复制 {len(urls)} 条链接到剪贴板")
+        self.status.set_text(f"已复制 {len(urls)} 条链接到剪贴板", style.MUTED)
 
     def _open_selected(self) -> None:
         rows = {i.row() for i in self.table.selectedIndexes()}
