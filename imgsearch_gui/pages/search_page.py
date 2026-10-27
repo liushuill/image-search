@@ -252,7 +252,9 @@ class SearchPage(QtWidgets.QWidget):
         self._set_preview(path)
         self.table.set_results([])
         self.copy_btn.setEnabled(False)
-        self.status.set_text("正在搜索…", style.MUTED)
+        # 进行中用蓝色：一眼能看出"它在跑"，结束后会被结果的颜色顶掉
+        self.status.set_text("正在搜索…", style.MUTED, flash=True,
+                             tint=style.ACCENT)
         self.log.clear()
         self._append_log(f"开始搜索：{path}")
 
@@ -299,7 +301,8 @@ class SearchPage(QtWidgets.QWidget):
             self.status.set_text("未找到匹配结果", style.WARN, flash=True)
 
     def _on_failed(self, message: str) -> None:
-        self.status.set_text("搜索失败 —— 详见下方过程日志", style.ERR, flash=True)
+        self.status.set_text("搜索失败 —— 详见下方过程日志", style.ERR,
+                             flash=True, tint=style.ERR)
         self._toggle_log(True)
         self.log_toggle.setChecked(True)
 

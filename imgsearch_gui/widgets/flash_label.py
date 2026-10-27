@@ -6,7 +6,7 @@
 一个还能看清文字的颜色**，让它一眼被注意到，又不会长时间刺眼。
 
 设计要点：
-- 颜色用橙色（`style.WARN`）—— 这些提示都是"你没做成某事"，语义上偏提醒
+- 颜色按语义选：橙（`WARN`）= 提醒 / 蓝（`ACCENT`）= 进行中 / 红（`ERR`）= 失败
 - 峰值不遮字：透明度最高只到 0.55，文字颜色保持原样
 - 落到的底色（0.16）仍然保留，让人知道"这里有一句提示"
 """
@@ -48,6 +48,7 @@ class FlashLabel(QtWidgets.QLabel):
     def __init__(self, text: str = "", parent=None):
         super().__init__(text, parent)
         self._text_color = style.MUTED
+        self._tint = style.WARN          # 默认橙色（提醒类）；可按需换成蓝/红
         self._alpha = 0.0
         self._anim = QtCore.QVariantAnimation(self)
         self._anim.setDuration(DURATION_MS)
@@ -59,17 +60,22 @@ class FlashLabel(QtWidgets.QLabel):
 
     # ── 对外 ────────────────────────────────────
 
-    def set_text(self, text: str, color: str = None, flash: bool = False) -> None:
+    def set_text(self, text: str, color: str = None, flash: bool = False,
+                 tint: str = None) -> None:
         """
         设置文字。
 
         Args:
             color: 文字颜色，省略则沿用上一次
             flash: 是否播一次背景闪动（播完停在稳定底色）
+            tint: 背景色，省略则沿用上一次（默认 `style.WARN` 橙）。
+                  语义：橙=提醒、蓝=进行中、红=失败。
         """
         self.setText(text)
         if color:
             self._text_color = color
+        if tint:
+            self._tint = tint
         if flash:
             self._anim.stop()
             self._anim.start()
@@ -93,7 +99,7 @@ class FlashLabel(QtWidgets.QLabel):
         if self._alpha <= 0.001:
             self.setStyleSheet(f"color:{self._text_color};")
             return
-        r, g, b = _rgb(style.WARN)
+        r, g, b = _rgb(self._tint)
         self.setStyleSheet(
             f"color:{self._text_color};"
             f"background:rgba({r},{g},{b},{self._alpha:.3f});"

@@ -66,6 +66,31 @@ class TestFlashLabel:
         finally:
             label.close()
 
+    def test_tint_color_can_be_overridden(self, qapp):
+        """进行中用蓝、失败用红 —— 背景色按语义切换"""
+        label = fl.FlashLabel("x")
+        try:
+            label.set_text("正在搜索…", flash=True, tint="#3b82f6")
+            label._on_tick(0.5)
+            assert "59,130,246" in label.styleSheet()      # style.ACCENT
+            label.set_text("失败", flash=True, tint="#dc2626")
+            label._on_tick(0.5)
+            assert "220,38,38" in label.styleSheet()       # style.ERR
+        finally:
+            label.close()
+
+    def test_tint_persists_between_calls(self, qapp):
+        """不传 tint 时沿用上一次 —— 避免每次都写一遍"""
+        label = fl.FlashLabel("x")
+        try:
+            label.set_text("a", flash=True, tint="#3b82f6")
+            label._on_tick(0.5)
+            label.set_text("b", flash=True)
+            label._on_tick(0.5)
+            assert "59,130,246" in label.styleSheet()
+        finally:
+            label.close()
+
     def test_clear_tint(self, qapp):
         label = fl.FlashLabel("x")
         try:
