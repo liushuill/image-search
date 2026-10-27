@@ -54,6 +54,7 @@ class SearchPage(QtWidgets.QWidget):
 
         self.drop = DropArea()
         self.drop.dropped.connect(lambda paths: self.start_search(paths[0]))
+        self.drop.hint.connect(self._show_drop_hint)
         self.drop.clicked.connect(self._pick_file)
         ll.addWidget(self.drop)
 
@@ -204,6 +205,15 @@ class SearchPage(QtWidgets.QWidget):
         self.engine_combo.setMinimumWidth(max(need, 180))
 
     # ── 选图 ────────────────────────────────────
+
+    def _show_drop_hint(self, text: str) -> None:
+        """
+        拖拽没搜成时说明原因。
+
+        什么都不发生是最糟的反馈：用户分不清"卡住了"还是"拖错了"。
+        """
+        self.status.setText(text)
+        self.status.setStyleSheet(f"color:{style.MUTED};")
 
     def _pick_file(self) -> None:
         patterns = " ".join(f"*{s}" for s in sorted(IMAGE_SUFFIXES))
