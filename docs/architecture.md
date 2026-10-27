@@ -279,6 +279,11 @@ class MyEngine(SearchEngine):
 ---
 
 
+## 打包
+
+编译产物的做法、实测体积、Qt LGPL 合规要求都记在
+[packaging-notes.md](packaging-notes.md) —— **这是给构建者看的，不放进 README**。
+
 ## 已知的一处架构欠债
 
 `service.py`（GUI 用的服务层）在 `search_with_cache()` 里**延迟导入** `cli.search_image`

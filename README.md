@@ -22,7 +22,6 @@
 | 图库：换位置还认得出、清理、判重 | [docs/library.md](docs/library.md) |
 | 出问题了（尤其 Windows） | [docs/troubleshooting.md](docs/troubleshooting.md) |
 | 想读 / 改代码 | [docs/architecture.md](docs/architecture.md) |
-| 打包编译产物 | [docs/packaging-notes.md](docs/packaging-notes.md) |
 | 某个设计为什么这么定 | [docs/history.md](docs/history.md) |
 
 ---
@@ -60,6 +59,9 @@
 ---
 
 ## 快速开始
+
+> **不想装 Python？** 可以直接下载打包好的安装包 ——
+> 见 [Releases](https://github.com/liushuill/image-search/releases)（**尚未发布**）。
 
 需要 **Python 3.10+**，其余依赖首次运行时自动装进 `.venv`，不污染系统 Python。
 
@@ -146,7 +148,7 @@ Windows 把 `./run.sh` 换成 `run.bat`。
 
 ## 目前状态
 
-- **尚未发布编译产物**。打包前的准备与实测数据见 [docs/packaging-notes.md](docs/packaging-notes.md)
+- **安装包尚未发布** —— 目前只能从源码运行（见上面的快速开始）
 - 测试：949 项（pytest），Linux 与 Windows 均可运行
 - 已知限制：`PySide6` 限制在 `<6.12`（6.12.0 有可复现的退出崩溃），细节见 [troubleshooting](docs/troubleshooting.md)
 
