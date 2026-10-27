@@ -5,45 +5,7 @@
 
 ---
 
-## 界面
-
-```bash
-./run-gui.sh          # Linux（首次自动装 PySide6）
-run-gui.bat           # Windows
-```
-
-单窗口 + 侧栏，共七个页面。最常用的四个：
-
-| 页面 | 作用 |
-|---|---|
-| **搜索** | 拖入图片即搜；结果表可复制/打开链接；缓存命中会明确标注「未消耗配额」 |
-| **引擎** | 按各引擎自己的 Schema 自动生成配置表单；「测试」按钮只做配置自检与端点连通性检查，**不消耗搜索配额** |
-| **凭据** | **凭据只在这里填**；程序写进 `.env` 并设为 600 —— 你不需要打开那个文件 |
-| **设置** | 代理地址与探活地址（含「测试代理」）、是否使用本地图库、是否缓存缩略图 |
-
-> 已实测在 KDE Wayland 下使用**原生 wayland 平台插件**（`platformName() == "wayland"`），
-> 不走 XWayland 转译，因此拖拽与 HiDPI 都是原生行为。
-
-## 命令行
-
-```bash
-./run.sh config secrets            # 查看凭据状态
-./run.sh search 图片.jpg            # 搜索出处
-./run.sh search 图片.jpg --url      # 顺便生成 Pixiv 图片直链
-./run.sh batch ./待查目录            # 批量搜索，产出 JSON + CSV
-```
-
-首次运行会自动创建 `.venv` 并安装依赖（不会污染系统 Python）。
-
-## 直接调用（与启动脚本等价）
-
-```bash
-python -m imgsearch search 图片.jpg
-python run_cli.py search 图片.jpg      # 无需设置 PYTHONPATH
-imgsearch search 图片.jpg              # 若已 pip install -e .
-```
-
----
+> 界面与常用命令已经写在 [README](../README.md#使用) 里了，这里只放细节。
 
 ## 配置
 
