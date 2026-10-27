@@ -85,37 +85,6 @@ def hamming_distance(hash1: str, hash2: str) -> int:
     return bin(h1 ^ h2).count("1")
 
 
-def guess_output_filename(
-    pixiv_id: str,
-    artist: str = "",
-    title: str = "",
-    page: int = 0,
-    ext: str = ".jpg",
-) -> str:
-    """
-    根据元数据生成有意义的文件名
-
-    Args:
-        pixiv_id: Pixiv 作品 ID
-        artist: 画师名
-        title: 作品标题
-        page: 页码
-        ext: 扩展名
-
-    Returns:
-        文件名（不含路径）
-    """
-    parts = []
-    if artist:
-        parts.append(_sanitize_filename(artist))
-    if title:
-        parts.append(_sanitize_filename(title))
-    parts.append(pixiv_id)
-    if page > 0:
-        parts.append(f"p{page}")
-
-    return f"[{pixiv_id}] {' - '.join(parts)}{ext}"
-
 
 def _sanitize_filename(name: str) -> str:
     """清理文件名中的非法字符"""

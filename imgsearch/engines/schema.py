@@ -61,10 +61,6 @@ class Field:
     def is_secret(self) -> bool:
         return self.type == SECRET
 
-    @property
-    def is_structured(self) -> bool:
-        return self.type == KV
-
 
 # ── 类型转换与校验 ──────────────────────────────────────────
 

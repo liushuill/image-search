@@ -144,17 +144,6 @@ class PixivUrlGenerator:
                 return s.enabled
         return None
 
-    def update_source(self, name: str, **kwargs) -> bool:
-        """更新模板属性"""
-        for s in self._sources:
-            if s.name.lower() == name.lower():
-                for k, v in kwargs.items():
-                    if hasattr(s, k):
-                        setattr(s, k, v)
-                self._save_sources()
-                return True
-        return False
-
     @staticmethod
     def get_default_sources() -> List[dict]:
         """获取默认模板列表（用于恢复初始设置）"""

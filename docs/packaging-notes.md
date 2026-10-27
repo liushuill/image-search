@@ -79,16 +79,16 @@ tkinter  numpy  matplotlib
 
 ### 两条命令（Linux 实测可用）
 
+> ⚠️ 必须带 `--collect-submodules imgsearch` / `imgsearch_gui`：
+> 引擎适配器是 **registry 用 pkgutil 动态扫描** 出来的，静态分析看不全；
+> 漏了就表现为「内置 5 个引擎一个都没有」。
+
 ```bash
 # GUI（推荐 onedir，见合规要求）
 python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
-  --paths . $(printf -- "--exclude-module %s " \
-      PySide6.QtWebEngineCore PySide6.QtWebEngineWidgets PySide6.QtQml \
-      PySide6.QtQuick PySide6.Qt3DCore PySide6.Qt3DRender \
-      PySide6.QtMultimedia PySide6.QtCharts PySide6.QtPdf \
-      PySide6.QtDesigner PySide6.QtUiTools PySide6.QtHelp PySide6.QtTest \
-      PySide6.QtSql PySide6.QtSensors PySide6.QtSerialPort \
-      tkinter numpy matplotlib) \
+  --paths . \
+  --collect-submodules imgsearch --collect-submodules imgsearch_gui \
+  --hidden-import bs4 --hidden-import cloudscraper --hidden-import lxml \
   --add-data "config.example.json:." \
   --add-data "THIRD_PARTY_NOTICES.md:." \
   --add-data "LICENSES:LICENSES" \
@@ -96,7 +96,8 @@ python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
 
 # CLI
 python -m PyInstaller --noconfirm --onedir --console --name ImageSearch-CLI \
-  --paths . run_cli.py
+  --paths . --collect-submodules imgsearch \
+  run_cli.py
 ```
 
 > Windows 上 `--add-data` 的分隔符是 `;` 而不是 `:`（`源;目标`）。

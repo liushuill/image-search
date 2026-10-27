@@ -14,7 +14,7 @@
 **映射表是给人看的，语法越简单越好。** 真要复杂逻辑，写一个 Python 引擎文件。
 """
 
-from typing import Any, List, Optional
+from typing import Any, List
 
 _MISSING = object()
 
@@ -81,16 +81,6 @@ def dig_str(data: Any, path: str) -> str:
     value = dig(data, path)
     return _as_text(value)
 
-
-def dig_float(data: Any, path: str) -> Optional[float]:
-    """取一个数字；取不到返回 None（调用方据此判定「无相似度」）"""
-    value = dig(data, path)
-    if value is None: 
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
 
 
 def dig_any(data: Any, path: str) -> str:

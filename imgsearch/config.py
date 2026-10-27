@@ -231,10 +231,6 @@ def is_secret_key(key: str) -> bool:
     return key in _SECRET_KEYS
 
 
-def secret_env_name(key: str):
-    """配置键对应的环境变量名，非凭据返回 None"""
-    return _SECRET_KEYS.get(key)
-
 
 def get_proxies():
     """获取代理配置（requests 格式），未配置返回 None"""

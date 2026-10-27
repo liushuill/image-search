@@ -595,27 +595,6 @@ class EngineStore:
             engines.append(ec)
         return engines
 
-    def _preset_configs(self) -> List[EngineConfig]:
-        """
-        把「配置预设」变成引擎条目（实验分支：消灭 Python 引擎类）。
-
-        预设走 module_path/class_name 指向通用适配器，
-        所以 Store 里看不到任何站点专属的 Python 代码。
-        """
-        from imgsearch.engines.adapters.presets import PRESETS
-
-        out: List[EngineConfig] = []
-        for preset in PRESETS:
-            ec = EngineConfig(
-                name=preset.name, enabled=preset.enabled, priority=0,
-                module_path=preset.module_path, class_name=preset.class_name,
-            )
-            self._apply_schema_defaults(ec)
-            ec.settings.update(preset.settings)
-            ec._preset_order = preset.order        # 排序用，不落盘
-            out.append(ec)
-        return out
-
     def _apply_presets(self, engines: List[EngineConfig]) -> List[EngineConfig]:
         """
         把「配置预设」应用到已有条目（幂等，每次加载都跑）。

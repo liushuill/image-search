@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "image-search"
-version = "0.2.0"
+version = "0.12.0"   # 与 README 的「预发布」阶段对齐
 description = "二次元图片溯源工具 — 以图搜图查找图片来源（Pixiv / Danbooru 等）"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -18,7 +18,7 @@ imgsearch = "imgsearch.cli:main"
 
 [tool.setuptools.packages.find]
 # 自动发现所有子包，新增 engine/子模块时无需回来改这张表
-include = ["imgsearch*"]
+include = ["imgsearch*", "imgsearch_gui*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

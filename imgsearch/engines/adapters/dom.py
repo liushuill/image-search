@@ -84,10 +84,6 @@ def extract(node, spec: str) -> str:
     return ""
 
 
-def extract_any(node, spec: str) -> str:
-    """回退链的第一个非空值（extract 本身已支持 ``|``，这里只是语义别名）"""
-    return extract(node, spec)
-
 
 def extract_links(node, spec: str) -> List[str]:
     """

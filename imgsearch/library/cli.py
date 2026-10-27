@@ -70,10 +70,6 @@ def add_parser(subparsers) -> None:
 # ──────────────────────────────────────────────
 
 
-def _open(args) -> LibraryDB:
-    from pathlib import Path
-    return LibraryDB(Path(args.db) if args.db else None)
-
 
 def _print_root_table(store: LibraryStore, db: LibraryDB) -> None:
     roots = RootManager(db).list()
