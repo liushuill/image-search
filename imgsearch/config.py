@@ -42,6 +42,21 @@ def _is_macos() -> bool:
     return sys.platform == "darwin"
 
 
+def _home() -> Path:
+    """
+    用户家目录：**优先 ``HOME``**，取不到才退回 :func:`Path.home`。
+
+    为什么要先看环境变量：``Path.home()`` 在 Windows 上读的是 ``USERPROFILE``，
+    **完全无视 ``HOME``**（CPython 的 ``ntpath.expanduser`` 行为）。于是想在某台
+    机器上验证「macOS / Linux 上数据根落在哪」时，设 ``HOME`` 没有效果 ——
+    两条分支的测试在 Windows 上必挂（实测 2 项）。
+
+    换成 HOME 优先之后：POSIX 上 ``HOME`` 本来就存在且与 ``Path.home()`` 等价，
+    行为不变；Windows 分支根本不走这里；测试也能真正控制家目录。
+    """
+    return Path(os.environ.get("HOME") or Path.home())
+
+
 def _resolve_data_root() -> Path:
     """
     决定**可写数据**放在哪里。四级优先：
@@ -70,11 +85,11 @@ def _resolve_data_root() -> Path:
 
     if _is_windows():
         base = (os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA")
-                or str(Path.home()))
+                or str(_home()))
         return Path(base) / "image-search"
     if _is_macos():
-        return Path.home() / "Library" / "Application Support" / "image-search"
-    base = os.environ.get("XDG_DATA_HOME") or str(Path.home() / ".local" / "share")
+        return _home() / "Library" / "Application Support" / "image-search"
+    base = os.environ.get("XDG_DATA_HOME") or str(_home() / ".local" / "share")
     return Path(base) / "image-search"
 
 
