@@ -64,27 +64,65 @@ DATA_ROOT  可写数据：config.json、.env、data/（数据库+缩略图）、
 ### 前置
 
 ```bash
-pip install pyinstaller        # 建议放进 requirements-dev.txt
+pip install pyinstaller
 ```
 
-### 排除无用的 Qt 模块（实测有效，省掉 400+ MB）
+### 排除清单（务必照抄，不是可选项）
 
+不排除的话，PySide6 会把整个 Qt 拖进来（~580 MB）。下面这组是实测过的：
+
+| 类别 | 模块 |
+|---|---|
+| Web 引擎 | `QtWebEngineCore` `QtWebEngineWidgets` `QtWebEngineQuick` `QtWebChannel` |
+| QML / Quick | `QtQml` `QtQuick` `QtQuickWidgets` |
+| 3D | `Qt3DCore` `Qt3DRender` |
+| 多媒体 | `QtMultimedia` `QtMultimediaWidgets` `QtSpatialAudio` |
+| 图表 / 可视化 | `QtCharts` `QtDataVisualization` |
+| PDF | `QtPdf` `QtPdfWidgets` |
+| 设计器 / 工具 | `QtDesigner` `QtUiTools` `QtHelp` |
+| 测试 / 设备 | `QtTest` `QtBluetooth` `QtNfc` `QtPositioning` `QtLocation` `QtSensors` `QtSerialPort` |
+| 数据库 / 状态机 | `QtSql` `QtStateMachine` `QtScxml` `QtRemoteObjects` |
+| 语音 | `QtTextToSpeech` |
+| 无关 Python 库 | `tkinter` `numpy` `matplotlib` |
+
+### Windows（完整命令，直接复制）
+
+> `--add-data` 用**分号** `源;目标`；行尾用 PowerShell 的反引号续行。
+
+```powershell
+.\venv\Scripts\python.exe -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch `
+  --paths . `
+  --collect-submodules imgsearch --collect-submodules imgsearch_gui `
+  --hidden-import bs4 --hidden-import cloudscraper --hidden-import lxml `
+  --add-data "config.example.json;." `
+  --add-data "THIRD_PARTY_NOTICES.md;." `
+  --add-data "LICENSES;LICENSES" `
+  --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets `
+  --exclude-module PySide6.QtWebEngineQuick --exclude-module PySide6.QtWebChannel `
+  --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick `
+  --exclude-module PySide6.QtQuickWidgets `
+  --exclude-module PySide6.Qt3DCore --exclude-module PySide6.Qt3DRender `
+  --exclude-module PySide6.QtMultimedia --exclude-module PySide6.QtMultimediaWidgets `
+  --exclude-module PySide6.QtSpatialAudio `
+  --exclude-module PySide6.QtCharts --exclude-module PySide6.QtDataVisualization `
+  --exclude-module PySide6.QtPdf --exclude-module PySide6.QtPdfWidgets `
+  --exclude-module PySide6.QtDesigner --exclude-module PySide6.QtUiTools `
+  --exclude-module PySide6.QtHelp `
+  --exclude-module PySide6.QtTest --exclude-module PySide6.QtBluetooth `
+  --exclude-module PySide6.QtNfc --exclude-module PySide6.QtPositioning `
+  --exclude-module PySide6.QtLocation --exclude-module PySide6.QtSensors `
+  --exclude-module PySide6.QtSerialPort `
+  --exclude-module PySide6.QtSql --exclude-module PySide6.QtStateMachine `
+  --exclude-module PySide6.QtScxml --exclude-module PySide6.QtRemoteObjects `
+  --exclude-module PySide6.QtTextToSpeech `
+  --exclude-module tkinter --exclude-module numpy --exclude-module matplotlib `
+  run_gui.py
 ```
-PySide6.QtWebEngine*  Qt3D*  QtMultimedia*  QtCharts  QtDataVisualization
-QtPdf*  QtDesigner  QtUiTools  QtHelp  QtTest  QtBluetooth  QtNfc
-QtPositioning  QtLocation  QtSensors  QtSerialPort  QtSql
-QtSpatialAudio  QtTextToSpeech  QtRemoteObjects  QtScxml  QtStateMachine
-tkinter  numpy  matplotlib
-```
 
-### 两条命令（Linux 实测可用）
 
-> ⚠️ 必须带 `--collect-submodules imgsearch` / `imgsearch_gui`：
-> 引擎适配器是 **registry 用 pkgutil 动态扫描** 出来的，静态分析看不全；
-> 漏了就表现为「内置 5 个引擎一个都没有」。
+### Linux（完整命令）
 
 ```bash
-# GUI（推荐 onedir，见合规要求）
 python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
   --paths . \
   --collect-submodules imgsearch --collect-submodules imgsearch_gui \
@@ -92,20 +130,29 @@ python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
   --add-data "config.example.json:." \
   --add-data "THIRD_PARTY_NOTICES.md:." \
   --add-data "LICENSES:LICENSES" \
+  --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets \
+  --exclude-module PySide6.QtWebEngineQuick --exclude-module PySide6.QtWebChannel \
+  --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick \
+  --exclude-module PySide6.QtQuickWidgets \
+  --exclude-module PySide6.Qt3DCore --exclude-module PySide6.Qt3DRender \
+  --exclude-module PySide6.QtMultimedia --exclude-module PySide6.QtMultimediaWidgets \
+  --exclude-module PySide6.QtSpatialAudio \
+  --exclude-module PySide6.QtCharts --exclude-module PySide6.QtDataVisualization \
+  --exclude-module PySide6.QtPdf --exclude-module PySide6.QtPdfWidgets \
+  --exclude-module PySide6.QtDesigner --exclude-module PySide6.QtUiTools \
+  --exclude-module PySide6.QtHelp \
+  --exclude-module PySide6.QtTest --exclude-module PySide6.QtBluetooth \
+  --exclude-module PySide6.QtNfc --exclude-module PySide6.QtPositioning \
+  --exclude-module PySide6.QtLocation --exclude-module PySide6.QtSensors \
+  --exclude-module PySide6.QtSerialPort \
+  --exclude-module PySide6.QtSql --exclude-module PySide6.QtStateMachine \
+  --exclude-module PySide6.QtScxml --exclude-module PySide6.QtRemoteObjects \
+  --exclude-module PySide6.QtTextToSpeech \
+  --exclude-module tkinter --exclude-module numpy --exclude-module matplotlib \
   run_gui.py
 
-# CLI
-python -m PyInstaller --noconfirm --onedir --console --name ImageSearch-CLI \
-  --paths . --collect-submodules imgsearch \
-  run_cli.py
+tar -czf image-search-linux-x86_64.tar.gz -C dist ImageSearch
 ```
-
-> Windows 上 `--add-data` 的分隔符是 `;` 而不是 `:`（`源;目标`）。
-
-### 可能需要的 `--hidden-import`
-
-`bs4`、`cloudscraper`、`lxml`、`charset_normalizer` 有时探测不到；
-打包后启动若报 `ModuleNotFoundError`，逐个补上。
 
 ### 入口
 
@@ -114,7 +161,29 @@ python -m PyInstaller --noconfirm --onedir --console --name ImageSearch-CLI \
 | `run_gui.py` | GUI（`--windowed`） |
 | `run_cli.py` | CLI（`--console`） |
 
-`build_exe.bat` 是 Windows 上的骨架脚本，已指向这两个入口。
+GUI 与 CLI 是**两个不同的产物**，命令里的 `--windowed` / `--console` 别弄反：
+GUI 用 console 模式会多弹一个黑框；CLI 用 windowed 模式会看不到输出。
+
+### 为什么不能省 `--collect-submodules`
+
+引擎适配器是 **registry 用 pkgutil 动态扫描** 出来的，静态分析看不全；
+漏了就是「内置 5 个引擎一个都没有」。
+
+### 打完之后先验这四件事
+
+1. 运行 `dist/ImageSearch/ImageSearch`（Windows 是 `ImageSearch.exe`）
+2. 数据落在**用户目录**：Windows `%LOCALAPPDATA%\image-search`，Linux `$XDG_DATA_HOME/image-search`
+3. 那里出现了 `config.json` + `data/image_metadata.db` + `data/thumbs`
+4. 程序目录里**没有**多出用户数据；界面上拖一张图能搜出结果
+
+### 压缩与发布
+
+| 平台 | 产物 | 参考体积 |
+|---|---|---|
+| Windows | `Compress-Archive dist/ImageSearch image-search-windows-x64.zip` | 200 MB → **60–80 MB** |
+| Linux | `tar -czf ... -C dist ImageSearch` | 204 MB → **60 MB**（tar.xz） |
+
+> 打包时**不要**把 `data/`、`config.json`、`.env`、`.venv` 放进去 —— 那是用户自己的数据。
 
 ---
 
