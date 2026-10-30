@@ -18,13 +18,38 @@ from PySide6 import QtWidgets                          # noqa: E402
 from imgsearch_gui import style                        # noqa: E402
 
 
+def _claim_taskbar_identity() -> None:
+    """
+    Windows：给进程一个稳定的 AppUserModelID。
+
+    不做这件事，Windows 会把窗口归到 `python.exe` 名下 —— 任务栏显示的是
+    Python 的图标，而不是我们的；分组、固定到任务栏也会错乱。
+    必须在 QApplication 创建**之前**设置。
+    """
+    if sys.platform != "win32":
+        return
+    try:
+        import ctypes
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID(  # type: ignore
+            "liushuill.image-search")
+    except Exception:                                     # noqa: BLE001
+        pass                                              # 只是外观，失败不该影响启动
+
+
 def create_app(argv=None) -> QtWidgets.QApplication:
+    # 图标与任务栏身份都要在 QApplication 建好之前/之后立刻处理
+    _claim_taskbar_identity()
     app = QtWidgets.QApplication(argv or sys.argv)
     app.setApplicationName("image-search")
     app.setApplicationDisplayName("二次元图片溯源")
     app.setOrganizationName("image-search")
     app.setStyle("Fusion")
     app.setStyleSheet(style.QSS)
+
+    from imgsearch_gui.assets import window_icon
+    icon = window_icon()
+    if not icon.isNull():
+        app.setWindowIcon(icon)
 
     wire_quit_cleanup(app)
     warn_if_low_integrity()

@@ -97,6 +97,8 @@ pip install pyinstaller
   --add-data "config.example.json;." `
   --add-data "THIRD_PARTY_NOTICES.md;." `
   --add-data "LICENSES;LICENSES" `
+  --add-data "assets;assets" `
+  --icon assets/ImageSearch.ico `
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets `
   --exclude-module PySide6.QtWebEngineQuick --exclude-module PySide6.QtWebChannel `
   --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick `
@@ -130,6 +132,7 @@ python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
   --add-data "config.example.json:." \
   --add-data "THIRD_PARTY_NOTICES.md:." \
   --add-data "LICENSES:LICENSES" \
+  --add-data "assets:assets" \
   --exclude-module PySide6.QtWebEngineCore --exclude-module PySide6.QtWebEngineWidgets \
   --exclude-module PySide6.QtWebEngineQuick --exclude-module PySide6.QtWebChannel \
   --exclude-module PySide6.QtQml --exclude-module PySide6.QtQuick \
@@ -153,6 +156,22 @@ python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
 
 tar -czf image-search-linux-x86_64.tar.gz -C dist ImageSearch
 ```
+
+### 图标
+
+仓库根的 `assets/` 里有整套尺寸（16–512 PNG + 一个多尺寸 `ImageSearch.ico`）。
+
+| 用途 | 用哪个 |
+|---|---|
+| **Windows exe 图标** | `--icon assets/ImageSearch.ico`（ico 里含 16/24/32/48/64/128/256） |
+| **窗口图标（运行期）** | `assets/ImageSearch-256.png`，由 `imgsearch_gui/assets.py` 自动定位 |
+| Linux 桌面项 / AppImage | `assets/ImageSearch-256.png`（或 512） |
+
+`assets/` 必须通过 `--add-data` 打进产物，否则运行期找不到 —— 窗口会退回 Qt 默认图标，
+而且**不会报错**，很容易漏。
+
+> Windows 还额外做了一件事：启动时设置 AppUserModelID，否则任务栏会显示成
+> `python.exe` 的图标、分组也会错乱（见 `app.py::_claim_taskbar_identity`）。
 
 ### 入口
 
