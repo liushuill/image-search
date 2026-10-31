@@ -130,19 +130,36 @@ Windows 把 `./run.sh` 换成 `run.bat`。
 
 ## 数据放在哪里
 
-| 类别 | 内容 | 位置 |
-|---|---|---|
-| 只读资源 | 代码、`config.example.json`、`LICENSES/` | 程序所在目录 |
-| **可写数据** | `config.json`、`.env`、`data/`（图库 + 缩略图）、`output/` | 见下 |
+图片、配置、凭据这些**可写数据**放在哪，取决于你怎么运行：
 
-可写数据按以下顺序决定：
+| 你怎么用 | 数据在哪 |
+|---|---|
+| 从源码运行（`run-gui.sh` / `run.bat`） | 仓库目录里（`config.json`、`data/`、`output/`） |
+| 用下载的安装包 | 系统用户目录：Windows `%LOCALAPPDATA%\image-search`、Linux `~/.local/share/image-search`、macOS `~/Library/Application Support/image-search` |
+| 想做成**便携版**（数据跟着文件夹走） | 在程序旁边放一个空文件 `portable.txt` |
 
-1. 环境变量 `IMGSEARCH_DATA_DIR`
-2. exe 旁边放一个 `portable.txt` → 数据留在 exe 旁（**便携版**）
-3. **打包运行** → Windows `%LOCALAPPDATA%\image-search`、macOS `~/Library/Application Support/image-search`、Linux `$XDG_DATA_HOME/image-search`（缺省 `~/.local/share/image-search`）
-4. **源码运行** → 仓库目录（就是你现在看到的样子）
+### 便携版
 
-> 从源码跑的**不需要迁移任何东西** —— 第 4 条与改造前完全一致。
+解压后目录长这样，加一个空文件 `portable.txt` 即可：
+
+```
+ImageSearch/
+├── ImageSearch(.exe)
+├── portable.txt      ← 手动新建，内容留空
+├── config.json       ← 之后自动生成
+├── data/             ← 图库 + 缩略图
+└── output/           ← 导出的结果
+```
+
+这样整个文件夹拷到 U 盘 / 另一台机器都能带着数据走。
+
+> 不放 `portable.txt` 就会用系统用户目录 —— 程序目录是只读的（比如装在
+> `Program Files`）或升级时会被覆盖，数据放那里不安全。
+
+### 两个特殊情形
+
+- 环境变量 `IMGSEARCH_DATA_DIR=/某个/绝对路径` → 强制指定，优先级最高
+- 只读资源（代码、`config.example.json`、`LICENSES/`）**永远跟着程序走**，与数据无关
 
 ---
 
