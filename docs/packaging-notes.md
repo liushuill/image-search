@@ -170,8 +170,14 @@ tar -czf image-search-linux-x86_64.tar.gz -C dist ImageSearch
 `assets/` 必须通过 `--add-data` 打进产物，否则运行期找不到 —— 窗口会退回 Qt 默认图标，
 而且**不会报错**，很容易漏。
 
-> Windows 还额外做了一件事：启动时设置 AppUserModelID，否则任务栏会显示成
-> `python.exe` 的图标、分组也会错乱（见 `app.py::_claim_taskbar_identity`）。
+> ⚠️ **不要**给进程设自定义 AppUserModelID（曾踩过）：Windows 11 的任务栏按钮
+> 是按 AUMID 找图标的，设了一个没注册过的 ID（便携版没有开始菜单快捷方式），
+> 结果任务栏显示**通用应用图标**，而窗口标题栏的图标是正常的 —— 很难看出原因。
+>
+> 现在的做法：什么都不设。打包后的 exe 自带 `--icon` 嵌入的图标，Windows 会直接用它；
+> 源码运行时任务栏显示的是 `python.exe` 的图标（没有快捷方式，这是正常的）。
+>
+> 将来若做**安装器**（创建开始菜单快捷方式并写入 AppID），那时才需要设 AUMID。
 
 ### 入口
 
