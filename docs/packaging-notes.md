@@ -213,10 +213,31 @@ GUI 用 console 模式会多弹一个黑框；CLI 用 windowed 模式会看不�
 
 ### 压缩与发布
 
-| 平台 | 产物 | 参考体积 |
+| 平台 | 命令 | 参考体积 |
 |---|---|---|
-| Windows | `Compress-Archive dist/ImageSearch image-search-windows-x64.zip` | 200 MB → **60–80 MB** |
-| Linux | `tar -czf ... -C dist ImageSearch` | 204 MB → **60 MB**（tar.xz） |
+| Windows | `Compress-Archive -Path dist\ImageSearch -DestinationPath image-search-windows-x64.zip` | 200 MB → **60–80 MB** |
+| Linux | `tar -czf ... -C dist ImageSearch` | 305 MB → **81 MB** |
+
+> ⚠️ **压的是整个文件夹，不是里面的 exe。**
+> `dist/ImageSearch/` 里有两样东西：`ImageSearch(.exe)` 只是个几 MB 的启动器，
+> 真正的程序在 **`_internal/`**（Python 解释器、Qt 的 DLL、我们的代码和 assets 全在里面）。
+> 只压 exe 的话，用户下载后双击会**一闪而过**。
+>
+> `_internal` 这个下划线名字是 PyInstaller 6 的约定，看着像临时目录，其实不可省。
+> 判断方法：压缩包应该在 **60–80 MB**；如果只有几 MB，就是漏了 `_internal/`。
+
+**上传前自查**（解压到临时目录，模拟用户）：
+
+```powershell
+Expand-Archive dist\image-search-windows-x64.zip -DestinationPath $env:TEMP\wintest -Force
+dir $env:TEMP\wintest\ImageSearch          # 必须能看到 _internal
+$env:TEMP\wintest\ImageSearch\ImageSearch.exe
+```
+
+```bash
+tmp=$(mktemp -d) && tar -xzf image-search-linux-x86_64.tar.gz -C "$tmp"
+"$tmp/ImageSearch/ImageSearch"               # 能起来就对了
+```
 
 > 打包时**不要**把 `data/`、`config.json`、`.env`、`.venv` 放进去 —— 那是用户自己的数据。
 
