@@ -61,7 +61,7 @@
 ## 快速开始
 
 > **不想装 Python？** 可以直接下载打包好的安装包 ——
-> 见 [Releases](https://github.com/liushuill/image-search/releases)（**尚未发布**）。
+> 见 [Releases](https://github.com/liushuill/image-search/releases)。
 
 需要 **Python 3.10+**，其余依赖首次运行时自动装进 `.venv`，不污染系统 Python。
 
