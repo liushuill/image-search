@@ -154,8 +154,18 @@ python -m PyInstaller --noconfirm --onedir --windowed --name ImageSearch \
   --exclude-module tkinter --exclude-module numpy --exclude-module matplotlib \
   run_gui.py
 
-tar -czf image-search-linux-x86_64.tar.gz -C dist ImageSearch
+# 规范化权限（沙箱/不同 umask 下可能留下 775 组可写目录）
+find dist/ImageSearch -type d -exec chmod 755 {} +
+find dist/ImageSearch -type f -exec chmod 644 {} +
+chmod 755 dist/ImageSearch/ImageSearch
+
+# 属主归零 = 发布包惯例（解压时自动归解压者所有）
+tar --owner=0 --group=0 --numeric-owner -czf \
+    image-search-linux-x86_64.tar.gz -C dist ImageSearch
 ```
+
+> 实测（2026-10）：解开后 305 MB → **tar.gz 81 MB**（27%）。
+> 这里的 `--owner=0` 只是惯例，普通用户解压后文件仍归自己所有。
 
 ### 图标
 
